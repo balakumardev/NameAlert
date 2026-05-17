@@ -1,5 +1,7 @@
 # NameAlert
 
+[![Build](https://github.com/balakumardev/NameAlert/actions/workflows/build.yml/badge.svg)](https://github.com/balakumardev/NameAlert/actions/workflows/build.yml)
+
 Native macOS 26+ (Tahoe) menu-bar app that continuously transcribes audio on-device using Apple's Speech framework, watches for user-defined keywords, and fires configurable alerts.
 
 Sits in the menu bar — no Dock icon, no window. Pick a keyword (like your name), and get notified whenever it's spoken over system audio or your microphone.
@@ -39,7 +41,53 @@ Sits in the menu bar — no Dock icon, no window. Pick a keyword (like your name
 
 After granting Screen Recording, you must **quit and relaunch** the app for the permission to take effect.
 
+### Permission Persistence
+
+TCC permissions (Screen Recording, Microphone, Speech Recognition) are stored in macOS's TCC database and **persist across restarts** — you only grant them once per app build.
+
+However, because CI builds are not signed with an Apple Developer certificate, each new DMG build gets a different ad-hoc code signature. This means macOS may re-prompt for permissions after you update to a new build. To avoid this:
+
+- **Use a single DMG build** for as long as possible before upgrading
+- **Or sign locally** with your own development certificate: open `NameAlert.xcodeproj` in Xcode, set your team under Signing & Capabilities, and build from Xcode — permissions will then survive across local rebuilds
+
+## Install
+
+Download the latest DMG from the [GitHub Actions page](https://github.com/balakumardev/NameAlert/actions?query=workflow%3ABuild+branch%3Amain) (click the latest run, then download `NameAlert.dmg` under Artifacts).
+
+### Opening an Unsigned App
+
+Since NameAlert is not signed with an Apple Developer certificate, Gatekeeper will block it the first time. To open it anyway:
+
+1. **Ctrl+click** (or right-click) **NameAlert.app** → **Open**
+2. Click **Open** in the dialog
+
+This registers a Gatekeeper exception for that specific build. You only need to do this once per DMG download.
+
+> On Apple Silicon (M-series), you may also need to browse to the app in Finder, Ctrl+click → Open to get past the "cannot be opened because the developer cannot be verified" warning.
+
 ## Build & Run
+
+### Local Development
+
+```bash
+# Generate Xcode project
+xcodegen generate
+
+# Build and run from Xcode, or use the command line:
+xcodebuild -project NameAlert.xcodeproj -scheme NameAlert -configuration Debug \
+  -destination 'platform=macOS' build
+
+# Run tests
+xcodebuild -project NameAlert.xcodeproj -scheme NameAlert \
+  -destination 'platform=macOS' test
+
+# Launch the built app
+open ~/Library/Developer/Xcode/DerivedData/NameAlert-*/Build/Products/Debug/NameAlert.app
+```
+
+### CI Build (GitHub Actions)
+
+Every push to `main` and every pull request triggers an automated build and packages a DMG. See the workflow at `.github/workflows/build.yml`.
 
 ```bash
 # Generate Xcode project

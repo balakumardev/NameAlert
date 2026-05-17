@@ -1,0 +1,51 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build (Release)
+        run: |
+          xcodebuild -project NameAlert.xcodeproj -scheme NameAlert \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package DMG
+        run: |
+          APP_PATH="build/Build/Products/Release/NameAlert.app"
+          DMG_NAME="NameAlert"
+          STAGING="dmg-staging"
+
+          mkdir -p "$STAGING"
+          cp -R "$APP_PATH" "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+
+          hdiutil create -volname "$DMG_NAME" -srcfolder "$STAGING" \
+            -ov -format UDZO "${DMG_NAME}.dmg"
+
+          rm -rf "$STAGING"
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: NameAlert.dmg
+          path: NameAlert.dmg

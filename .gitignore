@@ -24,6 +24,9 @@ NameAlert.xcodeproj
 # macOS
 .DS_Store
 
+# CI artifacts
+*.dmg
+
 # Swift Package Manager
 .swiftpm/
 .build/
