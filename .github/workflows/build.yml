@@ -70,9 +70,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="continuous"
-          gh release delete "$TAG" --yes 2>/dev/null || true
-          gh release create "$TAG" \
-            --title "NameAlert (continuous)" \
-            --notes "Latest automated build from \`${GITHUB_SHA:0:7}\`." \
-            NameAlert.dmg
+          VERSION="v0.1.${{ github.run_number }}"
+          DMG="NameAlert-${VERSION}.dmg"
+          mv NameAlert.dmg "$DMG"
+          gh release create "$VERSION" \
+            --title "NameAlert ${VERSION}" \
+            --notes "Automated build from commit \`${GITHUB_SHA:0:7}\`." \
+            "$DMG"
