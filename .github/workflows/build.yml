@@ -57,8 +57,20 @@ jobs:
 
           rm -rf "$STAGING"
 
-      - name: Upload DMG
+      - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
           name: NameAlert.dmg
           path: NameAlert.dmg
+
+      - name: Create Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="continuous"
+          gh release delete "$TAG" --yes 2>/dev/null || true
+          gh release create "$TAG" \
+            --title "NameAlert (continuous)" \
+            --notes "Latest automated build from \`${GITHUB_SHA:0:7}\`." \
+            NameAlert.dmg
