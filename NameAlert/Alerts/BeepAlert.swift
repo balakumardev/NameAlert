@@ -7,7 +7,7 @@ struct BeepAlert: Alert {
     let soundName: String
 
     func fire(reason: Hit) async {
-        await MainActor.run {
+        await MainActor.run { [soundName] in
             NSSound(named: NSSound.Name(soundName))?.play()
         }
     }

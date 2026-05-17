@@ -13,6 +13,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Select Xcode with macOS 26 SDK
+        run: |
+          echo "=== Available Xcodes ==="
+          ls -d /Applications/Xcode*.app 2>/dev/null || echo "None found in /Applications"
+
+          echo "=== SDKs available ==="
+          for xcode in /Applications/Xcode*.app; do
+            sdk_dir="$xcode/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs"
+            echo "--- $xcode ---"
+            ls "$sdk_dir" 2>/dev/null || echo "  No SDKs found"
+            xcodebuild -version 2>/dev/null
+          done
+
+          echo "=== xcode-select current ==="
+          xcode-select -p
+          xcodebuild -version
+
       - name: Install XcodeGen
         run: brew install xcodegen
 
@@ -24,6 +41,7 @@ jobs:
           xcodebuild -project NameAlert.xcodeproj -scheme NameAlert \
             -configuration Release \
             -derivedDataPath build \
+            -destination 'platform=macOS,arch=arm64' \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
