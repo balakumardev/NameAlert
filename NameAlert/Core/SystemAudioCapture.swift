@@ -1,6 +1,6 @@
 import Foundation
 import AVFoundation
-import ScreenCaptureKit
+@preconcurrency import ScreenCaptureKit
 import CoreMedia
 
 /// Captures system audio output (speakers/headphones) via `ScreenCaptureKit`.

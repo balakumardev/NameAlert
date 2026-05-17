@@ -15,20 +15,15 @@ jobs:
 
       - name: Select Xcode with macOS 26 SDK
         run: |
-          echo "=== Available Xcodes ==="
-          ls -d /Applications/Xcode*.app 2>/dev/null || echo "None found in /Applications"
-
-          echo "=== SDKs available ==="
           for xcode in /Applications/Xcode*.app; do
-            sdk_dir="$xcode/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs"
-            echo "--- $xcode ---"
-            ls "$sdk_dir" 2>/dev/null || echo "  No SDKs found"
-            xcodebuild -version 2>/dev/null
+            sdk_path="$xcode/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.sdk"
+            if [ -d "$sdk_path" ]; then
+              echo "Found macOS 26 SDK in $(basename $xcode .app)"
+              sudo xcode-select -s "$xcode"
+              xcodebuild -version
+              break
+            fi
           done
-
-          echo "=== xcode-select current ==="
-          xcode-select -p
-          xcodebuild -version
 
       - name: Install XcodeGen
         run: brew install xcodegen

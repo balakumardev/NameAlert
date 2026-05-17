@@ -1,5 +1,5 @@
 import Foundation
-import AVFoundation
+@preconcurrency import AVFoundation
 import Speech
 
 /// Wraps Apple's `SpeechAnalyzer` + `SpeechTranscriber` (macOS 26+) into a long-lived
@@ -119,18 +119,11 @@ actor TranscriptionService {
     // MARK: - Private
 
     private func consumeResults(transcriber: SpeechTranscriber) async {
-        do {
-            for try await result in transcriber.results {
-                let text = String(result.text.characters)
-                if !text.isEmpty {
-                    transcriptsContinuation.yield(text)
-                }
+        for await result in transcriber.results {
+            let text = String(result.text.characters)
+            if !text.isEmpty {
+                transcriptsContinuation.yield(text)
             }
-        } catch is CancellationError {
-            return
-        } catch {
-            statesContinuation.yield(.error(error.localizedDescription))
-            scheduleRestart()
         }
     }
 
