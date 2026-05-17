@@ -119,11 +119,18 @@ actor TranscriptionService {
     // MARK: - Private
 
     private func consumeResults(transcriber: SpeechTranscriber) async {
-        for await result in transcriber.results {
-            let text = String(result.text.characters)
-            if !text.isEmpty {
-                transcriptsContinuation.yield(text)
+        do {
+            for try await result in transcriber.results {
+                let text = String(result.text.characters)
+                if !text.isEmpty {
+                    transcriptsContinuation.yield(text)
+                }
             }
+        } catch is CancellationError {
+            return
+        } catch {
+            statesContinuation.yield(.error(error.localizedDescription))
+            scheduleRestart()
         }
     }
 
