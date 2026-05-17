@@ -1,0 +1,78 @@
+name: NameAlert
+options:
+  bundleIdPrefix: dev.balakumar
+  createIntermediateGroups: true
+  deploymentTarget:
+    macOS: "26.0"
+  developmentLanguage: en
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    ENABLE_HARDENED_RUNTIME: YES
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGN_IDENTITY: "-"
+    DEAD_CODE_STRIPPING: YES
+    SWIFT_STRICT_CONCURRENCY: complete
+targets:
+  NameAlert:
+    type: application
+    platform: macOS
+    sources:
+      - path: NameAlert
+        excludes:
+          - "Info.plist"
+          - "NameAlert.entitlements"
+    info:
+      path: NameAlert/Info.plist
+      properties:
+        LSUIElement: true
+        CFBundleName: NameAlert
+        CFBundleDisplayName: NameAlert
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        NSHumanReadableCopyright: "Copyright © 2026"
+        NSMicrophoneUsageDescription: "NameAlert listens to your microphone on-device to detect when your name is spoken."
+        NSScreenCaptureUsageDescription: "NameAlert listens to system audio (Zoom, Teams, etc.) on-device to detect when your name is spoken."
+        NSSpeechRecognitionUsageDescription: "NameAlert uses on-device speech recognition to detect keywords in audio."
+    entitlements:
+      path: NameAlert/NameAlert.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.device.audio-input: true
+        com.apple.security.network.client: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.balakumar.NameAlert
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: NameAlert/Info.plist
+        CODE_SIGN_ENTITLEMENTS: NameAlert/NameAlert.entitlements
+        ENABLE_PREVIEWS: YES
+        COMBINE_HIDPI_IMAGES: YES
+  NameAlertTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - NameAlertTests
+    dependencies:
+      - target: NameAlert
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.balakumar.NameAlertTests
+        GENERATE_INFOPLIST_FILE: YES
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/NameAlert.app/Contents/MacOS/NameAlert"
+schemes:
+  NameAlert:
+    build:
+      targets:
+        NameAlert: all
+        NameAlertTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - NameAlertTests
+    archive:
+      config: Release
