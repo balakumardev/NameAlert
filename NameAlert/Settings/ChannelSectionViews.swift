@@ -256,11 +256,11 @@ struct NotificationPermissionRow: View {
                     .foregroundStyle(.orange)
             }
             Spacer(minLength: 8)
-            Button(isDenied ? "Open Settings" : "Turn On") {
+            Button(isDenied ? "Open System Settings" : "Turn On") {
                 if isDenied {
                     SystemSettingsLink.open(.notifications)
                 } else {
-                    Task { _ = await controller.requestPermission(.notifications) }
+                    Task { await controller.ask(for: .notifications) }
                 }
             }
             .accessibilityLabel(isDenied ? "Open System Settings to turn on notifications" : "Turn on notifications")

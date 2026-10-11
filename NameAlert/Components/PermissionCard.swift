@@ -43,6 +43,12 @@ struct PermissionCard: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                if kind == .screenRecording {
+                    Text(verbatim: Self.reapprovalNote)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if showsRelaunch {
                     Text(verbatim: Self.relaunchNote)
                         .font(.callout)
@@ -96,12 +102,10 @@ struct PermissionCard: View {
     }
 
     static func action(for status: PermissionStatus, hasAsked: Bool) -> Action {
-        switch status {
-        case .granted: .none
-        case .denied: .openSettings
-        // macOS says nothing about a Screen Recording prompt that was answered "no": after one request, still not
-        // allowed means the user has to turn it on in System Settings.
-        case .notDetermined: hasAsked ? .openSettings : .allow
+        switch PermissionOffer(status: status, hasAsked: hasAsked) {
+        case .allow: .allow
+        case .openSystemSettings: .openSettings
+        case .none: .none
         }
     }
 
@@ -120,12 +124,7 @@ struct PermissionCard: View {
     }
 
     static func title(for kind: PermissionKind) -> String {
-        switch kind {
-        case .microphone: "Microphone"
-        case .screenRecording: "Screen Recording"
-        case .speechRecognition: "Speech Recognition"
-        case .notifications: "Notifications"
-        }
+        kind.displayName
     }
 
     static func reason(for kind: PermissionKind) -> String {
@@ -151,6 +150,10 @@ struct PermissionCard: View {
     static var relaunchNote: String {
         "Not working yet? Relaunch \(AppInfo.displayName)."
     }
+
+    /// Under the Screen Recording card, always: since macOS 15 it asks again about once a month, and a missed prompt
+    /// silently ends the listening to calls.
+    static let reapprovalNote = "macOS may ask you to re-approve this about once a month. Approve it to keep hearing calls."
 }
 
 /// The small rounded label that says whether a permission is allowed: a colored dot and the words in the text color

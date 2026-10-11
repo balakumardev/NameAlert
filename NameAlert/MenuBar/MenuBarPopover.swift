@@ -1,3 +1,4 @@
+import AppKit
 import NameAlertRuntime
 import SwiftUI
 
@@ -20,7 +21,10 @@ struct MenuBarPopover: View {
 
     var body: some View {
         let isListening = if case .listening = controller.state { true } else { false }
-        let hasNotices = PopoverNotices.isShown(state: controller.state, warnings: controller.warnings)
+        let notificationsAreOff = PopoverNotices.showsNotificationsOff(
+            configuration: controller.configuration, permissions: controller.permissions)
+        let hasNotices = PopoverNotices.isShown(
+            state: controller.state, warnings: controller.warnings, notificationsAreOff: notificationsAreOff)
         VStack(alignment: .leading, spacing: 0) {
             PopoverHeader()
                 .padding(.horizontal, 16)
@@ -41,6 +45,11 @@ struct MenuBarPopover: View {
             PopoverFooter()
         }
         .frame(width: Self.width)
+        // A permission may have been turned on or off since the popover was last open: look again when it opens.
+        .task { await controller.refreshPermissions() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            Task { await controller.refreshPermissions() }
+        }
     }
 }
 

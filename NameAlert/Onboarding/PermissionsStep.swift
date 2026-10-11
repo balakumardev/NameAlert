@@ -10,10 +10,10 @@ struct PermissionsStep: View {
     /// Goes on although something that is needed is not allowed yet.
     var continueAnyway: () -> Void
 
-    @Environment(ListeningController.self) private var controller
+    /// Which permissions were asked for, in this setup or an earlier run; the app's own unless a test brings one.
+    var asks: PermissionAsks = .shared
 
-    /// The permissions the user was asked for during this setup.
-    @State private var asked: Set<PermissionKind> = []
+    @Environment(ListeningController.self) private var controller
 
     /// The most height the cards take before they scroll: what the step has left under its title.
     static let cardsHeight: CGFloat = 252
@@ -60,7 +60,7 @@ struct PermissionsStep: View {
     private func card(_ kind: PermissionKind, isOptional: Bool, permissions: PermissionsSnapshot) -> some View {
         let status = permissions[kind]
         return PermissionCard(
-            kind: kind, status: status, hasAsked: asked.contains(kind), isOptional: isOptional,
+            kind: kind, status: status, hasAsked: asks.hasAsked(kind), isOptional: isOptional,
             showsRelaunch: Self.showsRelaunch(
                 kind, status: status, wasOff: model.screenRecordingWasOff,
                 needsRelaunch: controller.warnings.contains(.screenRecordingNeedsRelaunch)),
@@ -74,10 +74,7 @@ struct PermissionsStep: View {
     private func allow(_ kind: PermissionKind) {
         // Allowing Screen Recording usually ends with the app being asked to quit and open again.
         if kind == .screenRecording { OnboardingResume.mark() }
-        Task {
-            _ = await controller.requestPermission(kind)
-            asked.insert(kind)
-        }
+        Task { await controller.ask(for: kind, asks: asks) }
     }
 
     private func openSettings(_ kind: PermissionKind) {

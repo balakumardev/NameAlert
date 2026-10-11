@@ -180,8 +180,13 @@ struct OnboardingRenderTests {
             .engine, name: "onboarding-5-engine-preparing", dark: false, controller: starting,
             model: model(.engine, filled: true))
 
-        let denied = DemoFixtures.controller(
-            .error(.permissionDenied(.screenRecording)), configuration: configurationWithMyName)
+        // Screen Recording was never asked for (macOS says "not decided"): the note offers to ask, like the popover does.
+        let denied = await PopoverRenderTests.failedStart(
+            source: .systemAudio,
+            permissions: PermissionsSnapshot(
+                microphone: .granted, screenRecording: .notDetermined, speechRecognition: .granted,
+                notifications: .granted),
+            finding: .permissionDenied(.screenRecording), configuration: configurationWithMyName)
         let problem = model(.engine, filled: true)
         problem.testStartedAt = Date()  // the test has begun, so it is not started again over the error
         try await render(
@@ -557,6 +562,24 @@ struct OnboardingLogicTests {
         }
         #expect(PermissionCard.reason(for: .screenRecording).contains(AppInfo.displayName))
         #expect(PermissionCard.relaunchNote.contains(AppInfo.displayName))
+        // macOS asks again about once a month, and a missed prompt ends the listening to calls: the card says so.
+        #expect(PermissionCard.reapprovalNote
+            == "macOS may ask you to re-approve this about once a month. Approve it to keep hearing calls.")
+    }
+
+    @Test("The permission cards and the popover offer the same thing for the same permission")
+    func cardsAndPopoverAgree() {
+        for status in [PermissionStatus.granted, .denied, .notDetermined] {
+            for hasAsked in [false, true] {
+                let card = PermissionCard.action(for: status, hasAsked: hasAsked)
+                let offer = PermissionOffer(status: status, hasAsked: hasAsked)
+                switch offer {
+                case .allow: #expect(card == .allow)
+                case .openSystemSettings: #expect(card == .openSettings)
+                case .none: #expect(card == .none)
+                }
+            }
+        }
     }
 
     @Test("Relaunch is offered for Screen Recording once it is allowed after being off, or when capture was refused")
