@@ -125,6 +125,21 @@ private let matchEdgeRows: [(String, String, Bool, Bool, Bool)] = [
     ("42", "42", true, true, true),
 ]
 
+/// Balanced must not take these for the name: an everyday word, or a word one vowel away from it. Term, heard.
+/// ("logan", "login") is missing on purpose: "login" is not in SCOWL at any size, so see `loginIsAKnownGap`.
+private let everydayWordRows: [(String, String)] = [
+    ("mike", "make"), ("luke", "like"), ("theo", "the"), ("john", "join"), ("evan", "even"), ("nina", "nine"),
+    ("beth", "both"), ("seth", "set"), ("tony", "tiny"), ("jane", "june"), ("mina", "mine"), ("shane", "share"),
+    ("ethan", "than"), ("brian", "brain"), ("james", "names"), ("megan", "began"),
+    ("casey", "case"), ("stacy", "stack"), ("paige", "page"), ("steven", "seven"), ("grant", "grand"),
+]
+
+/// ... while the ways a recognizer really mangles a name still count under Balanced. Term, heard.
+private let misheardNameRows: [(String, String)] = [
+    ("bala", "bhala"), ("bala", "balla"), ("bala", "baala"), ("john", "jhon"), ("sarah", "sara"),
+    ("priyanka", "pryanka"), ("krishnan", "krishna"), ("standup", "standups"),
+]
+
 @Suite("MatchingPrimitives")
 struct MatchingPrimitivesTests {
     // MARK: Tokens
@@ -236,6 +251,32 @@ struct MatchingPrimitivesTests {
         #expect(Sensitivity.exact.matches(term: term, heard: heard) == exact, "exact: \(term) vs \(heard)")
         #expect(Sensitivity.balanced.matches(term: term, heard: heard) == balanced, "balanced: \(term) vs \(heard)")
         #expect(Sensitivity.loose.matches(term: term, heard: heard) == loose, "loose: \(term) vs \(heard)")
+    }
+
+    @Test(arguments: everydayWordRows)
+    func balancedDoesNotTakeEverydayWordsForNames(term: String, heard: String) {
+        #expect(!Sensitivity.balanced.matches(term: term, heard: heard), "balanced: \(term) vs \(heard)")
+        #expect(!Sensitivity.exact.matches(term: term, heard: heard), "exact: \(term) vs \(heard)")
+    }
+
+    /// Logan is five letters, so one wrong vowel is inside Balanced's budget, and only the everyday-word list could
+    /// refuse "login". SCOWL has no "login" in any of its lists. When the list gains it (a supplement, say), this
+    /// test fails because the issue it expects is gone: move the pair into `everydayWordRows` then.
+    @Test func loginIsAKnownGap() {
+        withKnownIssue("SCOWL has no \"login\", so Balanced still takes it for Logan") {
+            #expect(!Sensitivity.balanced.matches(term: "logan", heard: "login"))
+        }
+    }
+
+    @Test(arguments: misheardNameRows)
+    func balancedStillHearsMangledNames(term: String, heard: String) {
+        #expect(Sensitivity.balanced.matches(term: term, heard: heard), "balanced: \(term) vs \(heard)")
+        #expect(Sensitivity.loose.matches(term: term, heard: heard), "loose: \(term) vs \(heard)")
+    }
+
+    @Test(arguments: [("mike", "make"), ("shane", "share"), ("seth", "set"), ("theo", "the"), ("brian", "brain")])
+    func looseIsExemptFromTheEverydayWordGuards(term: String, heard: String) {
+        #expect(Sensitivity.loose.matches(term: term, heard: heard), "loose: \(term) vs \(heard)")
     }
 
     @Test(arguments: Sensitivity.allCases)

@@ -19,7 +19,12 @@ let package = Package(
         ),
 
         // Module graph: Core <- Audio, Speech, Alerts <- Runtime
-        .target(name: "NameAlertCore"),
+        .target(
+            name: "NameAlertCore",
+            // The everyday-word list that Balanced matching uses, and SCOWL's license for it.
+            // Regenerate both with scripts/build_common_words.sh.
+            resources: [.copy("Resources/common-words-en.txt"), .copy("Resources/SCOWL-LICENSE.txt")]
+        ),
         .target(name: "NameAlertAudio", dependencies: ["NameAlertCore"]),
         .target(name: "NameAlertSpeech", dependencies: ["NameAlertCore", "whisper"]),
         .target(name: "NameAlertAlerts", dependencies: ["NameAlertCore"]),

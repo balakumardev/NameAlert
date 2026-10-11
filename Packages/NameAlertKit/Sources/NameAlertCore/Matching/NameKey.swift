@@ -16,6 +16,13 @@ public enum NameKey {
     /// of Devanagari, say) and are otherwise left as they are. A word with a digit in it has no sound to
     /// compare, so it is returned as it came.
     public static func key(_ token: String) -> String {
+        key(token, keepVowels: false)
+    }
+
+    /// The key with its vowels left in, for words where a different vowel makes a different name: steps 1 to 5
+    /// only, so Mike is `mike` and not `m*k*` (and is no longer the same as make), while Bala, Bhala, Balla and
+    /// Baala are all still `bala`. With `keepVowels` false this is `key(_:)`.
+    static func key(_ token: String, keepVowels: Bool) -> String {
         if token.unicodeScalars.contains(where: isNumber) { return token }
 
         let letters = Array(TextNormalizer.fold(token).unicodeScalars.filter(isLetterOrMark))  // step 1
@@ -23,6 +30,11 @@ public enum NameKey {
         let respelled = digraphsReplaced.map(soundAlike)  // step 3
         let withoutInnerH = dropInnerH(in: respelled)  // step 4
         let collapsed = collapseRuns(in: withoutInnerH)  // step 5
+        if keepVowels {
+            var kept = String.UnicodeScalarView()
+            kept.append(contentsOf: collapsed)
+            return String(kept)
+        }
         return String(maskVowels(in: collapsed))  // step 6
     }
 

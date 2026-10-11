@@ -131,12 +131,19 @@ private let ellipsis = "\u{2026}"
 private struct Word: Sendable {
     let text: String
     let length: Int
-    let key: String
+    private let foldedKey: String
+    private let vowelKey: String
 
     init(_ text: String) {
         self.text = text
         length = text.count
-        key = NameKey.key(text)
+        foldedKey = NameKey.key(text)
+        vowelKey = NameKey.key(text, keepVowels: true)
+    }
+
+    /// The `NameKey` with its vowels folded, or the one that keeps them.
+    func key(keepVowels: Bool) -> String {
+        keepVowels ? vowelKey : foldedKey
     }
 }
 
@@ -184,10 +191,11 @@ private struct CompiledRule: Sendable {
 private final class HeardText {
     let text: String
     let tokens: [Token]
-    // The three tables are indexed by `(count - 1) * tokens.count + start`: `count` words from word `start`.
+    // The tables are indexed by `(count - 1) * tokens.count + start`: `count` words from word `start`.
     private let joinedTexts: [String]
     private let joinedLengths: [Int]
     private var joinedKeys: [String?]
+    private var joinedVowelKeys: [String?]
 
     init(_ text: String) {
         self.text = text
@@ -207,6 +215,7 @@ private final class HeardText {
         joinedTexts = texts
         joinedLengths = lengths
         joinedKeys = [String?](repeating: nil, count: n * maxJoinedWords)
+        joinedVowelKeys = joinedKeys
     }
 
     func joined(_ count: Int, at start: Int) -> String {
@@ -217,11 +226,16 @@ private final class HeardText {
         joinedLengths[(count - 1) * tokens.count + start]
     }
 
-    func key(_ count: Int, at start: Int) -> String {
+    /// The `NameKey` of the run, with its vowels folded or kept. Worked out the first time it is asked for.
+    func key(_ count: Int, at start: Int, keepVowels: Bool) -> String {
         let slot = (count - 1) * tokens.count + start
-        if let key = joinedKeys[slot] { return key }
-        let key = NameKey.key(joinedTexts[slot])
-        joinedKeys[slot] = key
+        if let key = keepVowels ? joinedVowelKeys[slot] : joinedKeys[slot] { return key }
+        let key = NameKey.key(joinedTexts[slot], keepVowels: keepVowels)
+        if keepVowels {
+            joinedVowelKeys[slot] = key
+        } else {
+            joinedKeys[slot] = key
+        }
         return key
     }
 
@@ -271,9 +285,9 @@ extension CompiledTerm {
                 let position = start + offset
                 let heardWord = heard.joined(1, at: position)
                 let matches = sensitivity.matches(
-                    term: word.text, termLength: word.length, termKey: { word.key },
+                    term: word.text, termLength: word.length, termKey: { word.key(keepVowels: $0) },
                     heard: heardWord, heardLength: heard.length(1, at: position),
-                    heardKey: { heard.key(1, at: position) })
+                    heardKey: { heard.key(1, at: position, keepVowels: $0) })
                 guard matches else {
                     everyWordMatches = false
                     break
@@ -290,9 +304,9 @@ extension CompiledTerm {
             if count == 1 && words.count == 1 { continue }
             let heardRun = heard.joined(count, at: start)
             let matches = sensitivity.matches(
-                term: joined.text, termLength: joined.length, termKey: { joined.key },
+                term: joined.text, termLength: joined.length, termKey: { joined.key(keepVowels: $0) },
                 heard: heardRun, heardLength: heard.length(count, at: start),
-                heardKey: { heard.key(count, at: start) })
+                heardKey: { heard.key(count, at: start, keepVowels: $0) })
             if matches {
                 let order = candidates.count
                 let score = EditDistance.osa(joined.text, heardRun)
