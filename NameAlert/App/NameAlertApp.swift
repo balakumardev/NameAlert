@@ -31,10 +31,12 @@ struct NameAlertApp: App {
             HistoryWindow()
                 .appEnvironment(environment)
         }
+        .defaultSize(width: 760, height: 520)
 
         Window("Live Transcript", id: WindowID.live) {
             LiveTranscriptWindow()
                 .appEnvironment(environment)
         }
+        .defaultSize(width: 620, height: 460)
     }
 }

@@ -75,18 +75,7 @@ struct MatchTesterView: View {
     /// `sentence` with each match's words in bold on the accent color. A match is the words as they were written, so
     /// they are found in the sentence in order, each after the one before.
     static func highlighted(_ sentence: String, matches: [MatchResult]) -> AttributedString {
-        var text = AttributedString(sentence)
-        var from = sentence.startIndex
-        for match in matches {
-            guard !match.matchedText.isEmpty,
-                let found = sentence.range(of: match.matchedText, range: from..<sentence.endIndex),
-                let range = Range(found, in: text)
-            else { continue }
-            text[range].font = .body.bold()
-            text[range].backgroundColor = Color.accentColor.opacity(0.3)
-            from = found.upperBound
-        }
-        return text
+        TextHighlighting.marked(sentence, ranges: TextHighlighting.ranges(of: matches, in: sentence))
     }
 
     /// The marked parts of `text`, as plain strings, for tests.

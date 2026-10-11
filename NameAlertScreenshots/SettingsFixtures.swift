@@ -32,22 +32,34 @@ enum SettingsFixtures {
     }
 
     /// A controller on the inert stand-ins. `installedModels` are on disk, `stalledDownloads` have come this far and
-    /// go no further, notifications are at `notifications`, and each channel in `failingChannels` has failed once
-    /// with its error. Listening is off. A stalled download starts at once unless `startsStalledDownloads` is false.
+    /// go no further, notifications are at `notifications` (or every permission is as `permissions` says), and each
+    /// channel in `failingChannels` has failed once with its error. `history` (newest first) is what History lists.
+    /// Listening is off. A stalled download starts at once unless `startsStalledDownloads` is false.
     static func controller(
         configuration: AppConfiguration = DemoFixtures.settingsConfiguration,
         installedModels: Set<WhisperModel> = [],
         stalledDownloads: [WhisperModel: Double] = [:],
         notifications: PermissionStatus = .granted,
+        permissions: PermissionsSnapshot? = nil,
         failingChannels: [ChannelKind: any Error] = [:],
         capabilities: EngineCapabilities = SettingsFixtures.capabilities,
+        history: [Hit] = [],
         startsStalledDownloads: Bool = true
     ) async -> ListeningController {
         var dependencies = RuntimeDependencies.inert()
         dependencies.models = FakeModels(installed: installedModels, stalled: stalledDownloads)
-        dependencies.permissions = FakePermissions(notifications: notifications)
+        dependencies.permissions = permissions.map { FakePermissions(snapshot: $0) } ?? FakePermissions(notifications: notifications)
         dependencies.channels = failingChannels.map { FailingChannel(kind: $0.key, error: $0.value) }
         dependencies.capabilities = { capabilities }
+        if !history.isEmpty {
+            // A store that holds the hits already, and never writes them anywhere.
+            let store = HistoryStore(
+                fileURL: FileManager.default.temporaryDirectory
+                    .appendingPathComponent("NameAlert-render-\(UUID().uuidString)/history.json"),
+                debounce: .seconds(3600))
+            for hit in history.reversed() { await store.append(hit) }
+            dependencies.historyStore = store
+        }
 
         var configuration = configuration
         configuration.hasCompletedOnboarding = true
@@ -85,14 +97,21 @@ struct FakeModels: ModelProviding {
     func delete(_ model: WhisperModel) async throws {}
 }
 
-/// Every permission allowed, except notifications, which are at `notifications`.
+/// Permissions as `snapshot` says. Asking for one answers that it is allowed, and changes nothing.
 struct FakePermissions: PermissionsProviding {
-    let notifications: PermissionStatus
+    let permissions: PermissionsSnapshot
 
-    func snapshot() async -> PermissionsSnapshot {
-        PermissionsSnapshot(
+    /// Every permission allowed, except notifications, which are at `notifications`.
+    init(notifications: PermissionStatus) {
+        permissions = PermissionsSnapshot(
             microphone: .granted, screenRecording: .granted, speechRecognition: .granted, notifications: notifications)
     }
+
+    init(snapshot: PermissionsSnapshot) {
+        permissions = snapshot
+    }
+
+    func snapshot() async -> PermissionsSnapshot { permissions }
 
     func request(_ kind: PermissionKind) async -> Bool { true }
 }

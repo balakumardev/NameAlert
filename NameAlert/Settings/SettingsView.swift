@@ -66,9 +66,12 @@ struct SettingsView: View {
             AlertsSettingsView()
         case .speech:
             SpeechSettingsView()
-        case .history, .shortcuts, .about:
-            // These panes arrive with their own tasks.
-            ContentUnavailableView(selection.title, systemImage: selection.systemImage)
+        case .history:
+            HistorySettingsView()
+        case .shortcuts:
+            APISettingsView()
+        case .about:
+            AboutSettingsView()
         }
     }
 }

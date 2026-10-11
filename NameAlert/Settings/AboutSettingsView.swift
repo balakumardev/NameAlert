@@ -1,0 +1,172 @@
+import AppKit
+import NameAlertRuntime
+import SwiftUI
+
+/// Settings → About: the app and its version, what it does with your audio, where to get help, a report to send when
+/// something is wrong, running setup again, and the licenses of what it is built with.
+struct AboutSettingsView: View {
+    @Environment(ListeningController.self) private var controller
+    @Environment(WindowRouter.self) private var router
+
+    @State private var copy: CopyState = .idle
+    @State private var isShowingAcknowledgements: Bool
+    @State private var acknowledgements: String?
+
+    /// `showsAcknowledgements` opens the licenses from the start, for renders.
+    init(showsAcknowledgements: Bool = false) {
+        _isShowingAcknowledgements = State(initialValue: showsAcknowledgements)
+    }
+
+    /// What the one-line summary of privacy says.
+    static let privacySummary = "Everything is transcribed on this Mac. Audio and transcripts never leave it."
+
+    var body: some View {
+        Form {
+            Section {
+                hero
+            }
+
+            Section {
+                Link("Support", destination: AboutLinks.support)
+                    .foregroundStyle(.tint)
+                Link("Privacy", destination: AboutLinks.privacy)
+                    .foregroundStyle(.tint)
+            } header: {
+                SettingsSectionTitle("Help")
+            }
+
+            Section {
+                copyDiagnostics
+                setupAgain
+            } header: {
+                SettingsSectionTitle("Troubleshooting")
+            }
+
+            Section {
+                DisclosureGroup("Acknowledgements", isExpanded: $isShowingAcknowledgements) {
+                    ScrollView {
+                        Text(verbatim: acknowledgements ?? "")
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                    }
+                    .frame(height: 200)
+                    .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 6))
+                    .accessibilityLabel("Acknowledgements text")
+                }
+            } footer: {
+                SettingsCaption("whisper.cpp and the SCOWL word lists.")
+            }
+        }
+        .formStyle(.grouped)
+        .task(id: isShowingAcknowledgements) {
+            if isShowingAcknowledgements, acknowledgements == nil { acknowledgements = AboutLinks.acknowledgements() }
+        }
+    }
+
+    // MARK: Parts
+
+    private var hero: some View {
+        VStack(spacing: 6) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 80, height: 80)
+                .accessibilityHidden(true)
+            Text(verbatim: AppInfo.displayName)
+                .font(.title2.bold())
+            Text(verbatim: Self.versionLine(version: AppInfo.version, build: AppInfo.build))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Text(verbatim: Self.privacySummary)
+                .font(.callout)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 360)
+                .padding(.top, 6)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var copyDiagnostics: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 12) {
+                Button("Copy Diagnostics", action: copyReport)
+                    .disabled(copy == .working)
+                    .accessibilityLabel("Copy diagnostics")
+                if copy == .copied {
+                    Label("Copied", systemImage: "checkmark.circle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.green)
+                }
+            }
+            SettingsCaption(
+                "Copies the version, this Mac, what \(AppInfo.displayName) is doing and this session's log, for a support request. It has no keywords, secrets or anything that was heard.")
+        }
+    }
+
+    private var setupAgain: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button("Run Setup Again", action: runSetupAgain)
+                .accessibilityLabel("Run setup again")
+            SettingsCaption("Goes through the first-time steps again.")
+        }
+    }
+
+    // MARK: Actions
+
+    private func copyReport() {
+        copy = .working
+        Task {
+            let report = await Diagnostics.report(for: controller)
+            Pasteboard.copy(report)
+            copy = .copied
+            AccessibilityNotification.Announcement("Diagnostics copied").post()
+            try? await Task.sleep(for: .seconds(3))
+            copy = .idle
+        }
+    }
+
+    private func runSetupAgain() {
+        Self.runSetupAgain(controller: controller, router: router)
+    }
+
+    /// Marks setup as not done and opens it. Leaving it half-way brings it back at the next launch.
+    static func runSetupAgain(controller: ListeningController, router: WindowRouter) {
+        controller.edit { $0.hasCompletedOnboarding = false }
+        router.open(.onboarding)
+    }
+
+    enum CopyState: Equatable {
+        case idle, working, copied
+    }
+
+    // MARK: Words
+
+    /// "Version 1.0.0 (123)".
+    static func versionLine(version: String, build: String) -> String {
+        "Version \(version) (\(build))"
+    }
+}
+
+/// The addresses About links to, and the licenses text it shows.
+enum AboutLinks {
+    static let support = address("https://balakumardev.github.io/NameAlert/support.html")
+    static let privacy = address("https://balakumardev.github.io/NameAlert/privacy.html")
+
+    private static func address(_ text: String) -> URL {
+        // A fixed address: the tests read each one back.
+        URL(string: text) ?? URL(fileURLWithPath: "/")
+    }
+
+    /// The licenses of what the app is built with, from the file in the app. A sentence when it cannot be read.
+    static func acknowledgements(in bundle: Bundle = .main) -> String {
+        guard let url = bundle.url(forResource: "Acknowledgements", withExtension: "txt"),
+            let text = try? String(contentsOf: url, encoding: .utf8)
+        else { return "The acknowledgements could not be loaded." }
+        return text
+    }
+}
