@@ -456,7 +456,9 @@ struct ConfigStoreTests {
             let original = Data("{not json".utf8)
             try original.write(to: file)
 
-            let store = ConfigStore(fileURL: file, debounce: .milliseconds(150))
+            // Long enough that a loaded machine cannot stall this test past it between load() and the check below.
+            let debounce = Duration.seconds(1)
+            let store = ConfigStore(fileURL: file, debounce: debounce)
             let loaded = await store.load()
             #expect(try Data(contentsOf: file) == original)
 
@@ -464,7 +466,8 @@ struct ConfigStoreTests {
             let written = await waitUntil { (try? readConfiguration(at: file)) == loaded }
             #expect(written)
             try FileManager.default.removeItem(at: file)
-            try await Task.sleep(for: .milliseconds(500))
+            // A second write would come one debounce after the first, so look for it for longer than that.
+            try await Task.sleep(for: debounce * 1.5)
             #expect(!exists(file))
         }
     }
