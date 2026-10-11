@@ -113,12 +113,12 @@ private func mentions(_ name: String, in texts: [String]) -> Bool {
 struct WhisperEngineTests {
     // MARK: Decode settings
 
-    @Test func optionsAudioCtx() {
-        #expect(WhisperOptions.audioContext(seconds: 2) == 256)
-        #expect(WhisperOptions.audioContext(seconds: 6) == 364)
-        #expect(WhisperOptions.audioContext(seconds: 40) == 1_500)
-        // A segment of the longest kind (188 frames of 512 samples, 6.016 s) still fits with room to spare.
-        #expect(WhisperOptions.audioContext(seconds: Double(188 * 512) / 16_000) == 365)
+    @Test func optionsAudioCtxAndMaxTokens() {
+        // The model's whole encoder context for every segment, whatever its length: the options do not even take the
+        // length. A context cut to the audio made the Light model repeat itself until it ran out of tokens.
+        #expect(WhisperOptions.audioContext == 0)
+        // A cap on the tokens of one segment, in case the decoder loops anyway.
+        #expect(WhisperOptions.maxTokens == 64)
     }
 
     @Test func optionsPromptTruncates() throws {
@@ -155,16 +155,17 @@ struct WhisperEngineTests {
     }
 
     @Test func optionsFillWhisperParameters() {
-        let options = WhisperOptions(language: "en", prompt: "Bala", audioSeconds: 6, processorCount: 12)
-        #expect(options.audioContext == 364)
+        let options = WhisperOptions(language: "en", prompt: "Bala", processorCount: 12)
         #expect(options.threads == 4)
 
         var params = whisper_full_params()
+        params.audio_ctx = 512  // 0 is also the zero value: start from a cut context to see `apply` set the whole one
         options.apply(to: &params)
         #expect(params.strategy == WHISPER_SAMPLING_GREEDY)
         #expect(params.greedy.best_of == 1)
         #expect(params.n_threads == 4)
-        #expect(params.audio_ctx == 364)
+        #expect(params.audio_ctx == 0)
+        #expect(params.max_tokens == 64)
         #expect(params.no_context)
         #expect(params.no_timestamps)
         #expect(!params.single_segment)

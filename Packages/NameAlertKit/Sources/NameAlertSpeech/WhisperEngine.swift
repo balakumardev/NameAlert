@@ -277,8 +277,7 @@ public actor WhisperEngine: SpeechEngine {
         logSkipped(&state)
 
         let options = WhisperOptions(
-            language: context.language, prompt: prompt, audioSeconds: audioSeconds,
-            processorCount: ProcessInfo.processInfo.activeProcessorCount)
+            language: context.language, prompt: prompt, processorCount: ProcessInfo.processInfo.activeProcessorCount)
         let started = ContinuousClock.now
         let result = await context.transcribe(segment.samples, options: options)
         let processingSeconds = (ContinuousClock.now - started).inSeconds
