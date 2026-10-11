@@ -607,6 +607,13 @@ struct AlertsAndSpeechLogicTests {
         #expect(ChannelTestRow.lastFailureLine(nil, phase: .idle, now: now) == nil)
     }
 
+    @Test("Each channel that sends words off the Mac says so, and to whom")
+    func leavesTheMacNotes() {
+        #expect(LeavesTheMacNote.ntfy == "Sends the words around the mention to ntfy.")
+        #expect(LeavesTheMacNote.telegramCall == "Sends the words around the mention to CallMeBot.")
+        #expect(LeavesTheMacNote.webhook == "Sends the words around the mention to your webhook.")
+    }
+
     @Test("A sound menu offers every system sound, and one that is in use but not among them")
     func soundChoices() {
         #expect(SoundChoices.names(including: "Glass") == SystemSounds.names)

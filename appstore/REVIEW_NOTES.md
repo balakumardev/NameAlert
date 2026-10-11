@@ -5,7 +5,7 @@ NameAlert is a macOS menu-bar utility that alerts users when their name or chose
 - Menu-bar app: NameAlert lives in the macOS menu bar (ear icon). There is no Dock icon and no main window after completing initial setup.
 - Initial setup: On first launch, a setup window appears to configure a name and optional permissions.
 - No account or login: NameAlert requires no account, sign-in, subscription, or in-app purchase.
-- On-device processing: All speech transcription and keyword matching run entirely locally on the Mac. Audio and transcripts never leave the Mac.
+- On-device processing: All speech transcription and keyword matching run on the Mac. Audio never leaves the Mac. The words around a mention leave only if the user sets up an ntfy, Telegram call or webhook alert, and only to the service they chose.
 
 ## Permissions Requested
 - Screen & System Audio Recording: Used only to receive system audio from calls and videos via Apple's ScreenCaptureKit framework. NameAlert never records, captures, or saves screen content. The video stream is configured to a 2x2 pixel buffer that is immediately discarded.
@@ -27,4 +27,4 @@ NameAlert is a macOS menu-bar utility that alerts users when their name or chose
 
 ## Additional Notes
 - No in-app purchases or paid features exist in this app.
-- No external network requests are made unless the user explicitly configures a third-party webhook, ntfy topic, or CallMeBot notification.
+- Network requests: the app makes two kinds. (1) When a local speech model is needed, it is downloaded once from huggingface.co (a file of 32 to 60 MB; the request only asks for the file). It is needed when Apple's on-device speech is not available for the user's language, or when the user chooses it in Settings → Speech. (2) An alert goes to a webhook, ntfy topic or CallMeBot only if the user sets it up in Settings → Alerts. There are no other network requests: no accounts, no analytics, no ads.

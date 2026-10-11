@@ -2,7 +2,7 @@
 
 NameAlert is a macOS menu-bar app that alerts you the moment someone says your name or keyword during calls, meetings, or videos.
 
-Speech transcription runs entirely on your Mac, so audio and transcripts stay private. NameAlert is free, requires no account, and includes no analytics or advertisements.
+Speech transcription runs on your Mac, and your audio never leaves it. NameAlert is free, requires no account, and includes no analytics or advertisements.
 
 ## Features
 
@@ -41,10 +41,11 @@ Speech transcription runs entirely on your Mac, so audio and transcripts stay pr
 
 ## Privacy
 
-- Audio and transcripts never leave your Mac.
-- Transcription uses on-device speech recognition, or a small downloadable local model on Macs without it.
+- Audio never leaves your Mac.
+- The words around a mention leave only if you set up ntfy, a Telegram call (CallMeBot) or a webhook, and only to the service you chose.
+- Transcription uses on-device speech recognition, or a small local model on Macs without it. The model is downloaded once from huggingface.co.
 - No user accounts, no tracking, and no analytics.
-- External connections occur only if you configure an optional alert service (ntfy, CallMeBot, or custom webhook).
+- The only network connections are that model download and the alert services you set up.
 - Secrets and tokens are saved in the macOS Keychain.
 
 ## Building from Source
@@ -93,6 +94,8 @@ swift test --package-path Packages/NameAlertKit
 ## Acknowledgements
 
 - [whisper.cpp](https://github.com/ggerganov/whisper.cpp) (MIT License)
+- [Whisper](https://github.com/openai/whisper) model weights, OpenAI (MIT License)
+- [Silero VAD](https://github.com/snakers4/silero-vad), Silero Team (MIT License)
 - SCOWL word lists
 
 ## License

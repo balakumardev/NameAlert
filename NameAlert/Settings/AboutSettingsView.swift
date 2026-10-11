@@ -17,8 +17,9 @@ struct AboutSettingsView: View {
         _isShowingAcknowledgements = State(initialValue: showsAcknowledgements)
     }
 
-    /// What the one-line summary of privacy says.
-    static let privacySummary = "Everything is transcribed on this Mac. Audio and transcripts never leave it."
+    /// What the summary of privacy says: the audio stays, and what can leave is named, with where it goes.
+    static let privacySummary =
+        "Audio never leaves this Mac. The words around a mention leave only if you set up ntfy, a Telegram call or a webhook — and only to the service you chose."
 
     var body: some View {
         Form {
@@ -56,7 +57,7 @@ struct AboutSettingsView: View {
                     .accessibilityLabel("Acknowledgements text")
                 }
             } footer: {
-                SettingsCaption("whisper.cpp and the SCOWL word lists.")
+                SettingsCaption("whisper.cpp, the Whisper model weights, Silero VAD and the SCOWL word lists.")
             }
         }
         .formStyle(.grouped)

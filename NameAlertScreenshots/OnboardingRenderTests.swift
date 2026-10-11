@@ -227,9 +227,11 @@ struct OnboardingLogicTests {
     func welcomeWords() {
         #expect(WelcomeStep.headline == "Hear your name, even when you're not listening.")
         #expect(WelcomeStep.points.map { $0.text } == [
-            "Works with calls, videos and the room around you", "Runs entirely on this Mac",
+            "Works with calls, videos and the room around you", "Audio never leaves this Mac",
             "You choose how to be alerted",
         ])
+        #expect(WelcomeStep.privacyNote
+            == "The words around a mention leave only if you set up ntfy, a Telegram call or a webhook — and only to the service you chose.")
         for point in WelcomeStep.points {
             #expect(NSImage(systemSymbolName: point.symbol, accessibilityDescription: nil) != nil, "\(point.symbol)")
         }

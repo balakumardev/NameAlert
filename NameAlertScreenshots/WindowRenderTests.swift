@@ -568,22 +568,26 @@ struct HistoryApiAboutLogicTests {
     func aboutWords() {
         #expect(AboutSettingsView.versionLine(version: "1.0.0", build: "123") == "Version 1.0.0 (123)")
         #expect(AboutSettingsView.privacySummary
-            == "Everything is transcribed on this Mac. Audio and transcripts never leave it.")
+            == "Audio never leaves this Mac. The words around a mention leave only if you set up ntfy, a Telegram call or a webhook — and only to the service you chose.")
         #expect(AboutLinks.support.absoluteString == "https://balakumardev.github.io/NameAlert/support.html")
         #expect(AboutLinks.privacy.absoluteString == "https://balakumardev.github.io/NameAlert/privacy.html")
         #expect(AboutLinks.support.scheme == "https")
     }
 
-    @Test("The acknowledgements hold both licenses, a heading each, and ship in the app")
+    @Test("The acknowledgements hold every notice, a heading each, and ship in the app")
     func acknowledgements() throws {
         let text = AboutLinks.acknowledgements()
         #expect(!text.contains("could not be loaded"), "Acknowledgements.txt is not in the app's resources")
         let headings = text.split(separator: "\n").filter {
-            $0.hasPrefix("whisper.cpp and ggml") || $0.hasPrefix("SCOWL word lists")
+            $0.hasPrefix("whisper.cpp and ggml") || $0.hasPrefix("Whisper model weights")
+                || $0.hasPrefix("Silero VAD") || $0.hasPrefix("SCOWL word lists")
         }
-        #expect(headings.count == 2)
+        #expect(headings.count == 4)
         #expect(text.contains("Permission is hereby granted, free of charge"))
         #expect(text.contains("Copyright (c) 2023-2026 The ggml authors"))
+        // The model weights and the voice detector the app downloads come with their notices.
+        #expect(text.contains("Copyright (c) 2022 OpenAI"))
+        #expect(text.contains("Copyright (c) 2020-present Silero Team"))
         #expect(text.contains("Kevin Atkinson"))
         // The SCOWL notice is the one the package ships, word for word.
         let scowl = try String(

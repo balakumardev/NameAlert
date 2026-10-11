@@ -34,13 +34,18 @@
 
         <section class="policy-block">
           <h3>Data Sent to External Services</h3>
-          <p>The only data that leaves your Mac is an alert that you explicitly set up yourself. If you enable any of the following optional alert channels, NameAlert sends the alert notification directly to that service:</p>
+          <p>Your audio never leaves your Mac. The only part of what was said that can leave is the words around a mention, and only inside an alert that you explicitly set up yourself. If you enable any of the following optional alert channels, NameAlert sends the alert directly to the service you chose:</p>
           <ul>
-            <li><strong>ntfy:</strong> Sends a notification payload to your chosen ntfy topic server.</li>
-            <li><strong>CallMeBot:</strong> Sends a request to trigger a Telegram voice call to your phone.</li>
-            <li><strong>Custom Webhook:</strong> Sends a signed JSON payload containing the match details and transcript context to the URL you specify (such as Slack, Home Assistant, Zapier, or n8n).</li>
+            <li><strong>ntfy:</strong> Sends a notification to your chosen ntfy topic on the ntfy server you set (ntfy.sh unless you change it). It holds the word that was heard and the words around it.</li>
+            <li><strong>CallMeBot:</strong> Sends a request to trigger a Telegram voice call to you. The message that is read out is yours to set; by default it holds the word that was heard and the words around it.</li>
+            <li><strong>Custom Webhook:</strong> Sends a signed JSON payload to the URL you specify (such as Slack, Home Assistant, Zapier, or n8n). It holds the match details, the words around the mention and, when available, up to 30 seconds of what was said before it.</li>
           </ul>
-          <p>CoolSolve LLP does not operate proxy servers, collect these payloads, or have access to your alert data.</p>
+          <p>CoolSolve LLP does not operate proxy servers, collect these payloads, or have access to your alert data. Each of those services has its own privacy policy.</p>
+        </section>
+
+        <section class="policy-block">
+          <h3>Speech Model Download</h3>
+          <p>When your Mac cannot use Apple's on-device speech recognition for your language, or when you choose the local model in Settings, NameAlert downloads a speech model once from huggingface.co: a file of 32 to 60 MB, plus a voice-detection file of under 1 MB. The request asks only for the files. It carries none of your audio, text or settings; like any download, it shows the host your IP address and which file you asked for. After that, transcription works without an internet connection. When Apple's own speech assets are needed, macOS downloads them, not NameAlert.</p>
         </section>
 
         <section class="policy-block">

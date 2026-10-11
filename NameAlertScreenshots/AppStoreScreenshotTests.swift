@@ -44,7 +44,7 @@ struct ScreenshotSpec: Sendable {
     static let rules = ScreenshotSpec(name: "02-rules", headline: "Choose what to listen for and how to be alerted")
     static let alerts = ScreenshotSpec(name: "03-alerts", headline: "Sound, notification, alarm, push, call or webhook")
     static let onboarding = ScreenshotSpec(name: "04-onboarding", headline: "Set up in a minute")
-    static let live = ScreenshotSpec(name: "05-live", headline: "Runs entirely on your Mac")
+    static let live = ScreenshotSpec(name: "05-live", headline: "Your audio never leaves your Mac")
 
     static let all: [ScreenshotSpec] = [menuBar, rules, alerts, onboarding, live]
 }
@@ -722,7 +722,7 @@ struct AppStoreScreenshotLogicTests {
                 "Choose what to listen for and how to be alerted",
                 "Sound, notification, alarm, push, call or webhook",
                 "Set up in a minute",
-                "Runs entirely on your Mac",
+                "Your audio never leaves your Mac",
             ])
     }
 

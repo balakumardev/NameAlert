@@ -8,9 +8,13 @@ struct WelcomeStep: View {
     /// The three points: a symbol and the words.
     static let points: [(symbol: String, text: String)] = [
         ("speaker.wave.2", "Works with calls, videos and the room around you"),
-        ("laptopcomputer", "Runs entirely on this Mac"),
+        ("laptopcomputer", "Audio never leaves this Mac"),
         ("bell", "You choose how to be alerted"),
     ]
+
+    /// Under the points: the one thing that can leave the Mac, and where it goes.
+    static let privacyNote =
+        "The words around a mention leave only if you set up ntfy, a Telegram call or a webhook — and only to the service you chose."
 
     var body: some View {
         VStack(spacing: 16) {
@@ -40,6 +44,13 @@ struct WelcomeStep: View {
                 }
             }
             .padding(.top, 4)
+
+            Text(verbatim: Self.privacyNote)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 440)
         }
         .padding(.horizontal, 40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

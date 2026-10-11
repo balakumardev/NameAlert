@@ -165,6 +165,17 @@ enum HeaderName {
     }
 }
 
+/// The line under each channel that sends words off this Mac: what goes, and to whom.
+enum LeavesTheMacNote {
+    static func text(sendingTo service: String) -> String {
+        "Sends the words around the mention to \(service)."
+    }
+
+    static let ntfy = text(sendingTo: "ntfy")
+    static let telegramCall = text(sendingTo: "CallMeBot")
+    static let webhook = text(sendingTo: "your webhook")
+}
+
 /// The sound names a picker offers: every system sound, and the one in use if it is not among them.
 enum SoundChoices {
     static func names(including current: String) -> [String] {
@@ -341,6 +352,8 @@ struct NtfySection: View {
             ChannelTestRow(kind: .ntfy)
         } header: {
             SettingsSectionTitle(ChannelKind.ntfy.displayName)
+        } footer: {
+            SettingsCaption(LeavesTheMacNote.ntfy)
         }
     }
 
@@ -398,6 +411,8 @@ struct TelegramSection: View {
             ChannelTestRow(kind: .telegramCall)
         } header: {
             SettingsSectionTitle(ChannelKind.telegramCall.displayName)
+        } footer: {
+            SettingsCaption(LeavesTheMacNote.telegramCall)
         }
     }
 
@@ -443,6 +458,8 @@ struct WebhookSection: View {
             ChannelTestRow(kind: .webhook)
         } header: {
             SettingsSectionTitle(ChannelKind.webhook.displayName)
+        } footer: {
+            SettingsCaption(LeavesTheMacNote.webhook)
         }
     }
 
