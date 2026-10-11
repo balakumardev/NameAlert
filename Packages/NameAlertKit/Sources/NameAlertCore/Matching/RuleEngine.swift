@@ -21,9 +21,10 @@ public struct MatchResult: Sendable, Equatable {
 ///
 /// A rule matches when one of its terms is heard: word by word, or run together or split apart by the
 /// recognizer ("Balakumar" and "Bala Kumar"). How close a heard word must be to the term depends on the
-/// rule's sensitivity. See `Sensitivity.matches(term:heard:)`. Running words together is only tried for a term
-/// of 7 or more characters, whose heard words all have 2 or more, and for spoken initials ("A. J."), so that
-/// "Aman" is not heard in "a man" nor "Justin" in "just in".
+/// rule's sensitivity. See `Sensitivity.matches(term:heard:)`. Running words together is only tried when the heard
+/// words all have 2 or more characters and the term has 7 or more, or has 5 or 6 and one of the heard words is not an
+/// everyday word; and for spoken initials ("A. J."). So "Aman" is not heard in "a man" nor "Justin" in "just in",
+/// while "Sriram" is heard in "sri ram" and "Sai Ram" in "sairam".
 ///
 /// Where readings overlap, the closest one wins: every candidate is scored by its edit distance and they are
 /// chosen lowest distance first, then earliest start, then most heard words, dropping any that overlaps one
@@ -134,9 +135,13 @@ public struct RuleEngine: Sendable {
 private let contextWords = 8
 /// The most heard words that are joined to meet a term written as one word.
 private let maxJoinedWords = 3
-/// How many characters a term has to have, its words joined, to be met by heard words run together or split apart.
-/// Shorter terms would be found inside everyday phrases: "Aman" in "a man", "Isa" in "this is a test".
+/// How many characters a term has to have, its words joined, to be met by heard words run together or split apart
+/// whatever the heard words are.
 private let minCompoundTermLength = 7
+/// The least a term can have to be met that way at all, and then only when one of the heard words is not an everyday
+/// word: "sri ram" is "Sriram", "just in" is not "Justin". Shorter terms would be found inside ordinary phrases:
+/// "Aman" in "a man", "Isa" in "this is a test".
+private let minCompoundTermLengthWithAnUncommonWord = 5
 private let maxHints = 100
 private let ellipsis = "\u{2026}"
 
@@ -243,17 +248,22 @@ private final class HeardText {
     }
 
     /// Whether the `count` words from word `start` may be compared run together with a term of `termLength`
-    /// characters (its words joined): the term must be long enough and every heard word at least two characters, or
-    /// every heard word must be a single character, as when initials are spoken ("A. J.").
+    /// characters (its words joined). That is so when every heard word is a single character, as when initials are
+    /// spoken ("A. J."). Otherwise every heard word needs two characters or more, and the term must either have 7 or
+    /// more, or have 5 or 6 while at least one of the heard words is not an everyday word.
     func mayBeRunTogether(_ count: Int, at start: Int, forTermOfLength termLength: Int) -> Bool {
+        let words = start..<(start + count)
         var allSingle = true
         var allLong = true
-        for position in start..<(start + count) {
+        for position in words {
             let wordLength = length(1, at: position)
             if wordLength != 1 { allSingle = false }
             if wordLength < 2 { allLong = false }
         }
-        return allSingle || (allLong && termLength >= minCompoundTermLength)
+        if allSingle { return true }
+        guard allLong, termLength >= minCompoundTermLengthWithAnUncommonWord else { return false }
+        if termLength >= minCompoundTermLength { return true }
+        return words.contains { !CommonWords.contains(tokens[$0].normalized) }
     }
 
     /// The `NameKey` of the run, with its vowels folded or kept. Worked out the first time it is asked for.

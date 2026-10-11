@@ -368,19 +368,21 @@ struct RuleEngineTests {
     }
 
     @Test func termsOfSevenCharactersAreJoined() {
-        // Seven characters is the least that joins; one fewer does not.
+        // Seven characters always join; six only when a heard word is not an everyday one.
         let seven = Rule(name: "N", terms: ["Andrews"], sensitivity: .exact)
         let six = Rule(name: "N", terms: ["Andrew"], sensitivity: .exact)
         #expect(RuleEngine.matches(in: "so and rews here", rule: seven).map(\.matchedText) == ["and rews"])
-        #expect(RuleEngine.matches(in: "so and rew here", rule: six).isEmpty)
+        // "rew" is not an everyday word, "an" and "drew" both are.
+        #expect(RuleEngine.matches(in: "so and rew here", rule: six).map(\.matchedText) == ["and rew"])
+        #expect(RuleEngine.matches(in: "so an drew here", rule: six).isEmpty)
     }
 
     @Test func aTermWrittenAsSeveralWordsIsOnlySplitWhenItsJoinedFormIsLong() {
         let long = Rule(name: "N", terms: ["Bala Kumar"], sensitivity: .exact)  // "balakumar": 9 characters
-        let short = Rule(name: "N", terms: ["Jo Lee"], sensitivity: .exact)  // "jolee": 5 characters
+        let short = Rule(name: "N", terms: ["Al Li"], sensitivity: .exact)  // "alli": 4 characters
         #expect(RuleEngine.matches(in: "hello balakumar", rule: long).map(\.matchedText) == ["balakumar"])
-        #expect(RuleEngine.matches(in: "hello jolee", rule: short).isEmpty)
-        #expect(RuleEngine.matches(in: "hello jo lee", rule: short).map(\.matchedText) == ["jo lee"])
+        #expect(RuleEngine.matches(in: "hello alli", rule: short).isEmpty)
+        #expect(RuleEngine.matches(in: "hello al li", rule: short).map(\.matchedText) == ["al li"])
     }
 
     @Test func everyHeardWordNeedsTwoCharactersToBeJoined() {
@@ -398,6 +400,29 @@ struct RuleEngineTests {
         #expect(hits.first?.matchedText == "A. J")
         #expect(hits.first?.term == "AJ")
         #expect(RuleEngine.matches(in: "a j k", rule: Rule(name: "N", terms: ["AJK"], sensitivity: sensitivity)).count == 1)
+    }
+
+    /// Names of five or six letters, and what is heard: joined when a heard word is not an everyday one ("sai",
+    /// "sri"), kept apart when all of them are ("just in"). Shorter terms are never joined, longer ones always are.
+    private static let shortCompoundRows: [(term: String, text: String, hits: Int)] = [
+        ("Sairam", "hi sai ram here", 1),
+        ("Sai Ram", "hi sairam here", 1),
+        ("Sriram", "sri ram called", 1),
+        ("Justin", "I was just in time", 0),
+        ("Aman", "a man is here", 0),
+        ("Isa", "this is a test", 0),
+        ("Priya", "hi pri ya here", 1),  // five letters is the least that joins
+        ("Anil", "hi an il here", 0),  // four is not, even though "il" is not a word
+        ("Mankind", "so man kind here", 1),  // seven letters join whatever the words are
+    ]
+
+    @Test(arguments: shortCompoundRows.flatMap { row in [Sensitivity.exact, .balanced].map { (row, $0) } })
+    func shortNamesAreJoinedUnlessEveryHeardWordIsEveryday(
+        row: (term: String, text: String, hits: Int), sensitivity: Sensitivity
+    ) {
+        var engine = RuleEngine(rules: [Rule(name: "N", terms: [row.term], sensitivity: sensitivity)])
+        let hits = engine.hear(segment("s1", row.text), at: t0)
+        #expect(hits.count == row.hits, "\(sensitivity): \(row.term) in \"\(row.text)\"")
     }
 
     // MARK: Numbers
