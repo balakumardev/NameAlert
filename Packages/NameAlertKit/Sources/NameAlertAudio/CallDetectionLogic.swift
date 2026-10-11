@@ -45,11 +45,13 @@ public struct CallDetectionLogic: Sendable {
         "com.apple.voicebankingd", "com.apple.accessibility.heard", "com.apple.audioaccessoryd",
     ]
 
-    /// Safari, Chrome, Firefox, Edge, Brave, Arc, Opera and Vivaldi. A bundle ID that starts with one of these is a
-    /// browser, which takes in the helper processes that do the recording (`com.google.Chrome.helper`).
+    /// Safari and WebKit, Chrome, Firefox, Edge, Brave, Arc, Opera and Vivaldi. A bundle ID that starts with one of
+    /// these is a browser, which takes in the helper processes that do the recording (`com.google.Chrome.helper`).
+    /// Safari records in WebKit's own helpers (`com.apple.WebKit.GPU`), which are not under `com.apple.Safari`.
     public static let browserBundleIDPrefixes: [String] = [
-        "com.apple.Safari", "com.google.Chrome", "org.mozilla.firefox", "com.microsoft.edgemac",
-        "com.brave.Browser", "company.thebrowser.Browser", "com.operasoftware.Opera", "com.vivaldi.Vivaldi",
+        "com.apple.Safari", "com.apple.WebKit", "com.google.Chrome", "org.mozilla.firefox",
+        "com.microsoft.edgemac", "com.brave.Browser", "company.thebrowser.Browser", "com.operasoftware.Opera",
+        "com.vivaldi.Vivaldi",
     ]
 
     private struct Sighting: Sendable {

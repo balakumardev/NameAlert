@@ -78,12 +78,23 @@ struct CallDetectionTests {
 
     // MARK: Browsers
 
-    @Test func theBrowsersAreTheEightInTheSpec() {
+    @Test func theBrowsersAreTheSpecsEightAndWebKit() {
         #expect(
             CallDetectionLogic.browserBundleIDPrefixes == [
-                "com.apple.Safari", "com.google.Chrome", "org.mozilla.firefox", "com.microsoft.edgemac",
-                "com.brave.Browser", "company.thebrowser.Browser", "com.operasoftware.Opera", "com.vivaldi.Vivaldi",
+                "com.apple.Safari", "com.apple.WebKit", "com.google.Chrome", "org.mozilla.firefox",
+                "com.microsoft.edgemac", "com.brave.Browser", "company.thebrowser.Browser", "com.operasoftware.Opera",
+                "com.vivaldi.Vivaldi",
             ])
+    }
+
+    /// Safari records in WebKit's own helper processes, not under `com.apple.Safari`.
+    @Test(arguments: ["com.apple.WebKit.GPU", "com.apple.WebKit.WebContent"])
+    func webKitHelpersNeedTheBrowserDelay(bundleID: String) {
+        var logic = makeLogic()
+        let helper = [recording(500, bundleID)]
+        #expect(logic.update(processes: helper, now: t0) == .inactive)
+        #expect(logic.update(processes: helper, now: after(2)) == .inactive)
+        #expect(logic.update(processes: helper, now: after(3)) == .active([bundleID]))
     }
 
     @Test func browserNeedsThreeSeconds() {
