@@ -3,7 +3,7 @@ import Foundation
 /// One place where a rule's term was found in a text.
 public struct MatchResult: Sendable, Equatable {
     public let ruleID: UUID
-    /// The rule term that matched, as the user typed it.
+    /// The rule term that matched, as the user typed it, without the whitespace around it.
     public let term: String
     /// The matched words as they were written in the text, from the first to the last.
     public let matchedText: String
@@ -47,6 +47,14 @@ public struct RuleEngine: Sendable {
         let ids = Set(rules.map(\.id))
         lastFired = lastFired.filter { ids.contains($0.key) }
         recentKeys.keepOnly(rulesIn: ids)
+    }
+
+    /// Forgets which matches have been reported, so that segment IDs can be used again. A speech engine numbers its
+    /// segments from the start every time it is restarted, and a match in a new "s1" must not be taken for one in
+    /// the old "s1". Cooldowns are kept: a rule that has just alerted stays quiet for the rest of its cooldown.
+    /// Call this whenever a new pipeline starts.
+    public mutating func forgetSegments() {
+        recentKeys.removeAll()
     }
 
     /// Looks for the rules' terms in `update` and returns a `Hit` for each rule that should alert now.
@@ -102,14 +110,16 @@ public struct RuleEngine: Sendable {
     }
 
     /// The terms of the enabled rules as typed, trimmed, without repeats (ignoring case) and at most 100, in
-    /// rule order. Speech engines use them to favour these words.
+    /// rule order. A term with no letters or digits is left out: it can never be heard. Speech engines use the hints
+    /// to favour these words.
     public static func hints(for rules: [Rule]) -> [String] {
         var seen = Set<String>()
         var hints: [String] = []
         for rule in rules where rule.isEnabled {
             for term in rule.terms {
                 let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty, seen.insert(trimmed.lowercased()).inserted else { continue }
+                guard !TextNormalizer.normalizeTerm(trimmed).isEmpty, seen.insert(trimmed.lowercased()).inserted
+                else { continue }
                 hints.append(trimmed)
                 if hints.count == maxHints { return hints }
             }
@@ -153,7 +163,7 @@ private struct Word: Sendable {
 }
 
 private struct CompiledTerm: Sendable {
-    /// The term as the user typed it.
+    /// The term as the user typed it, without the whitespace around it.
     let typed: String
     let words: [Word]
     /// All the words run together.
@@ -181,7 +191,8 @@ private struct CompiledRule: Sendable {
             guard !words.isEmpty, seen.insert(words).inserted else { return nil }
             let compiled = words.map(Word.init)
             return CompiledTerm(
-                typed: typed, words: compiled, joined: compiled.count == 1 ? compiled[0] : Word(words.joined()))
+                typed: typed.trimmingCharacters(in: .whitespacesAndNewlines), words: compiled,
+                joined: compiled.count == 1 ? compiled[0] : Word(words.joined()))
         }
     }
 
@@ -439,6 +450,12 @@ private struct RecentKeys: Sendable {
         entries.append(Entry(ruleID: ruleID, key: key))
         if entries.count > capacity { members.remove(entries.removeFirst().key) }
         return true
+    }
+
+    /// Forgets every key.
+    mutating func removeAll() {
+        entries.removeAll()
+        members.removeAll()
     }
 
     /// Forgets the keys of every rule that is not in `ids`.

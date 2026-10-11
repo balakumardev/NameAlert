@@ -191,6 +191,15 @@ struct RuleEngineTests {
         #expect(try #require(results.first).term == "Bala")
     }
 
+    @Test func termsAreReportedWithoutTheWhitespaceAroundThem() throws {
+        var engine = RuleEngine(rules: [Rule(name: "N", terms: ["  Bala  ", "\tStand Up\n"])])
+        let hit = try #require(engine.hear(segment("s1", "Hey Bala"), at: t0).first)
+        #expect(hit.term == "Bala")
+        #expect(hit.matchedText == "Bala")
+        let results = RuleEngine.matches(in: "Time to stand up", rule: Rule(name: "N", terms: ["\tStand Up\n"]))
+        #expect(try #require(results.first).term == "Stand Up")
+    }
+
     @Test func updateRulesKeepsCooldown() {
         var engine = RuleEngine(rules: [bala])
         let first = engine.hear(segment("s1", "Bala"), at: t0)
@@ -222,6 +231,28 @@ struct RuleEngineTests {
         renamed.isEnabled = false
         engine.updateRules([renamed])
         #expect(engine.hear(segment("s3", "Priya"), at: after(100)).isEmpty)
+    }
+
+    @Test func forgetSegmentsAllowsReusedSegmentID() {
+        var engine = RuleEngine(rules: [bala])
+        #expect(engine.hear(segment("s1", "Bala"), at: t0).count == 1)
+        engine.forgetSegments()  // a new pipeline: its engine starts numbering segments from "s1" again
+        let again = engine.hear(segment("s1", "hello Bala"), at: after(11))
+        #expect(again.count == 1)
+
+        // Without it the new "s1" would be taken for the old one.
+        var other = RuleEngine(rules: [bala])
+        #expect(other.hear(segment("s1", "Bala"), at: t0).count == 1)
+        #expect(other.hear(segment("s1", "hello Bala"), at: after(11)).isEmpty)
+    }
+
+    @Test func forgetSegmentsKeepsCooldowns() {
+        var engine = RuleEngine(rules: [bala])
+        #expect(engine.hear(segment("s1", "Bala"), at: t0).count == 1)
+        engine.forgetSegments()
+        #expect(engine.hear(segment("s1", "Bala"), at: after(5)).isEmpty)  // still cooling down
+        #expect(engine.hear(segment("s1", "Bala"), at: after(10)).isEmpty)  // and this match is now remembered
+        #expect(engine.hear(segment("s2", "Bala"), at: after(20)).count == 1)
     }
 
     // MARK: Alternatives
@@ -486,8 +517,16 @@ struct RuleEngineTests {
         let many = Rule(name: "D", terms: (0..<150).map { "term\($0)" })
         let hints = RuleEngine.hints(for: [first, second, off, many])
         #expect(Array(hints.prefix(3)) == ["Bala", "Balakumar", "stand up"])
-        #expect(hints.count <= 100)
+        // Three from the first two rules, then term0, term1, ...: the 100th hint is term96, and term97 is cut.
+        #expect(hints.count == 100)
+        #expect(hints[99] == "term96")
+        #expect(!hints.contains("term97"))
         #expect(!hints.contains("x"))
+    }
+
+    @Test func hintsLeaveOutTermsWithoutLetters() {
+        let rule = Rule(name: "A", terms: ["!!!", "Bala", "...", "  -  ", "42"])
+        #expect(RuleEngine.hints(for: [rule]) == ["Bala", "42"])
     }
 
     @Test func hintsAreTrimmedAndNeverEmpty() {
