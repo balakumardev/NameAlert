@@ -437,13 +437,25 @@ struct NetworkChannelsTests {
     @Test func webhookWithoutAUsableAddressThrowsBeforeAnyRequest() async {
         let server = StubServer()
 
-        for address in ["", "   ", "ftp://hooks.example/x", "not a url"] {
+        // The last one is plain http to a server on the internet: only https goes there.
+        for address in ["", "   ", "ftp://hooks.example/x", "not a url", "http://hooks.example/alert"] {
             await #expect(throws: AlertDeliveryError.notConfigured(.webhook)) {
                 try await webhookChannel(server).deliver(
                     sampleHit(), settings: webhookSettings(url: address), secrets: noSecrets)
             }
         }
         #expect(server.requestCount == 0)
+    }
+
+    @Test func webhookAllowsPlainHttpOnTheLocalNetwork() async throws {
+        for address in ["http://192.168.1.20:8080/hook", "http://nas.local/hook", "http://localhost:9000/hook"] {
+            let server = StubServer()
+
+            try await webhookChannel(server).deliver(
+                sampleHit(), settings: webhookSettings(url: address), secrets: noSecrets)
+
+            #expect(server.onlyRequest?.request.url?.absoluteString == address)
+        }
     }
 
     // MARK: ntfy channel
@@ -590,8 +602,10 @@ struct NetworkChannelsTests {
             try await NtfyChannel(client: client(server)).deliver(
                 sampleHit(), settings: ntfySettings(topic: " "), secrets: noSecrets)
         }
-        for address in ["", "ntfy.example", "ftp://ntfy.example"] {
-            await #expect(throws: AlertDeliveryError.invalidAddress(.ntfy)) {
+        // A server that cannot be used is not set up either, as with the webhook's address; the last one is plain http
+        // to a server on the internet, and only https goes there.
+        for address in ["", "ntfy.example", "ftp://ntfy.example", "http://ntfy.example"] {
+            await #expect(throws: AlertDeliveryError.notConfigured(.ntfy)) {
                 try await NtfyChannel(client: client(server)).deliver(
                     sampleHit(), settings: ntfySettings(server: address), secrets: noSecrets)
             }

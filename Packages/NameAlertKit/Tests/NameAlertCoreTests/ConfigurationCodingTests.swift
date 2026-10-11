@@ -335,6 +335,89 @@ struct ConfigurationCodingTests {
         }
     }
 
+    /// Plain `http` is for a server on the user's own network only; anything else must be `https`. The webhook's
+    /// address and the ntfy server follow the same rule.
+    @Test(arguments: [
+        ("https://example.com", true),
+        ("HTTPS://Example.com/hook", true),
+        ("  https://example.com/hook\n", true),
+        ("https://example.com:8443/a/b?c=d", true),
+        ("https://example.com/hook?name=José", true),  // what is not valid in a query does not make an address unusable
+        ("http://nas.local/hook?token=a b", true),
+        ("http://example.com", false),
+        ("HTTP://example.com/hook", false),
+        ("http://192.168.1.20:8080/hook", true),
+        ("http://nas.local/x", true),
+        ("http://localhost:9000", true),
+        ("http://127.0.0.1:9000/x", true),
+        ("http://[::1]:9000/x", true),
+        ("http://10.1.2.3/", true),
+        ("http://172.16.0.5/", true),
+        ("http://172.32.0.1", false),
+        ("http://8.8.8.8/", false),
+        ("http://nas.local.example.com/x", false),
+        ("http://192.168.1.1@example.com/", false),  // the host is example.com, whatever stands before the @
+        ("http://example.com@192.168.1.1/", true),  // and here it is the address
+        ("ftp://x", false),
+        ("ftp://192.168.1.20/", false),
+        ("ws://localhost", false),
+        ("//192.168.1.20/x", false),  // no scheme
+        ("192.168.1.20:8080", false),
+        ("localhost:9000", false),
+        ("nas.local/x", false),
+        ("https://", false),
+        ("http://", false),
+        ("", false),
+    ])
+    func addressesNeedHttpsOrALocalHost(address: String, expected: Bool) {
+        var settings = ChannelSettings()
+        settings.ntfy.topic = "team"  // so that only the server decides
+
+        settings.webhook.url = address
+        #expect(settings.isConfigured(.webhook) == expected, "webhook \(address.debugDescription)")
+
+        settings.ntfy.server = address
+        #expect(settings.isConfigured(.ntfy) == expected, "ntfy \(address.debugDescription)")
+    }
+
+    @Test func ntfyNeedsBothATopicAndAUsableServer() {
+        var settings = ChannelSettings()
+        settings.ntfy.topic = "team"
+        #expect(settings.isConfigured(.ntfy))  // the default server is https://ntfy.sh
+
+        settings.ntfy.server = "http://ntfy.example.com"  // plain http to somewhere on the internet
+        #expect(!settings.isConfigured(.ntfy))
+        settings.ntfy.server = "http://192.168.1.5:8080"  // plain http to a box at home
+        #expect(settings.isConfigured(.ntfy))
+
+        settings.ntfy.topic = "  "
+        #expect(!settings.isConfigured(.ntfy))  // a good server is not enough
+    }
+
+    @Test(arguments: [
+        // On this Mac, or on the user's network.
+        ("localhost", true), ("LocalHost", true), ("nas.local", true), ("My-Mac.LOCAL", true), ("a.b.local", true),
+        ("127.0.0.1", true), ("127.12.34.56", true), ("127.255.255.255", true),
+        ("10.0.0.1", true), ("10.255.255.255", true),
+        ("172.16.0.1", true), ("172.20.1.1", true), ("172.31.255.255", true),
+        ("192.168.0.1", true), ("192.168.255.255", true),
+        ("::1", true), ("[::1]", true), ("  localhost\n", true),
+        // One step outside each range, and addresses that are not private at all.
+        ("126.255.255.255", false), ("128.0.0.1", false), ("9.255.255.255", false), ("11.0.0.1", false),
+        ("172.15.255.255", false), ("172.32.0.1", false), ("192.167.255.255", false), ("192.169.0.1", false),
+        ("169.254.10.10", false), ("100.64.0.1", false), ("8.8.8.8", false), ("0.0.0.0", false),
+        // Names that only look local.
+        ("", false), ("local", false), (".local", false), ("example.com", false), ("localhost.example.com", false),
+        ("mylocalhost", false), ("nas.local.example.com", false), ("nas.localhost", false), ("nas", false),
+        // Spellings that a resolver may read as something else (leading zeros are octal), and what is no address.
+        ("010.0.0.1", false), ("0x7f.0.0.1", false), ("127.1", false), ("2130706433", false),
+        ("10.0.0", false), ("10.0.0.1.5", false), ("10.0.0.256", false), ("10.0.0.+1", false), ("10.0.0.", false),
+        ("::2", false), ("::", false), ("fe80::1", false), ("::ffff:127.0.0.1", false), ("[::1", false), ("::1]", false),
+    ])
+    func localNetworkHosts(host: String, expected: Bool) {
+        #expect(ChannelSettings.isLocalNetworkHost(host) == expected, "\(host.debugDescription)")
+    }
+
     @Test func systemSoundNamesAreTheFourteenMacOSSounds() {
         #expect(SystemSounds.names == [
             "Basso", "Blow", "Bottle", "Frog", "Funk", "Glass", "Hero",

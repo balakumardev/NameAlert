@@ -147,14 +147,41 @@ public struct ChannelSettings: Codable, Sendable, Equatable {
 
     /// Whether `kind` has what it needs to deliver an alert.
     ///
-    /// Sound, notification, alarm and screen flash always work. ntfy needs a topic, Telegram a user and the
-    /// webhook an http(s) URL. Surrounding whitespace does not count.
+    /// Sound, notification, alarm and screen flash always work. ntfy needs a topic and a usable server, Telegram a user
+    /// and the webhook a usable address. An address is usable when it has a host and is `https`, or is plain `http` to a
+    /// host on the local network (see `isLocalNetworkHost`): what was heard does not cross the internet unencrypted.
+    /// Surrounding whitespace does not count.
     public func isConfigured(_ kind: ChannelKind) -> Bool {
         switch kind {
         case .sound, .notification, .persistentAlarm, .screenFlash: true
-        case .ntfy: !Self.trimmed(ntfy.topic).isEmpty
+        case .ntfy: !Self.trimmed(ntfy.topic).isEmpty && Self.isUsableAddress(ntfy.server)
         case .telegramCall: !Self.trimmed(telegramCall.user).isEmpty
-        case .webhook: Self.isWebURL(webhook.url)
+        case .webhook: Self.isUsableAddress(webhook.url)
+        }
+    }
+
+    /// Whether plain `http` may be used to reach `host`, because it is this Mac or a device on the user's own network:
+    ///
+    /// - `localhost`;
+    /// - a name ending in `.local` (what Macs and many NAS boxes call themselves over Bonjour);
+    /// - an IPv4 address in 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12 or 192.168.0.0/16;
+    /// - the IPv6 loopback address `::1`, with or without square brackets.
+    ///
+    /// Case does not matter. Nothing else counts, and a name is only judged by what it says, not by where it points.
+    /// `host` is the host alone, without scheme, port or path. The app's `NSAllowsLocalNetworking` setting is what lets
+    /// such requests through App Transport Security.
+    public static func isLocalNetworkHost(_ host: String) -> Bool {
+        var name = trimmed(host).lowercased()
+        if name.hasPrefix("["), name.hasSuffix("]") {
+            name = String(name.dropFirst().dropLast())  // how an IPv6 address stands in a URL
+        }
+        if name == "localhost" || name == "::1" { return true }
+        if name.hasSuffix(".local") { return name.count > ".local".count }
+        guard let octets = ipv4Octets(name) else { return false }
+        switch (octets[0], octets[1]) {
+        case (127, _), (10, _), (192, 168): return true
+        case (172, 16...31): return true
+        default: return false
         }
     }
 
@@ -162,8 +189,33 @@ public struct ChannelSettings: Codable, Sendable, Equatable {
         text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func isWebURL(_ text: String) -> Bool {
-        guard let url = URL(string: trimmed(text)), let scheme = url.scheme?.lowercased() else { return false }
-        return (scheme == "https" || scheme == "http") && !(url.host() ?? "").isEmpty
+    /// Whether `text` is an address an alert may be sent to: it has a scheme and a host, and is `https` or is `http`
+    /// to a local network host. It is read as a `URL`, the way the webhook channel reads it, so an address that the
+    /// channel can call is not turned down here for something like a space in its query.
+    private static func isUsableAddress(_ text: String) -> Bool {
+        guard let url = URL(string: trimmed(text)), let scheme = url.scheme?.lowercased(),
+            let host = url.host(), !host.isEmpty
+        else { return false }
+        switch scheme {
+        case "https": return true
+        case "http": return isLocalNetworkHost(host)
+        default: return false
+        }
+    }
+
+    /// The four numbers of `text` when it is an IPv4 address written the usual way: four groups of one to three digits
+    /// with no leading zeros (a resolver may read those as octal, so `010.0.0.1` is not `10.0.0.1`), none above 255.
+    /// Shorter or stranger spellings (`127.1`, `0x7f.0.0.1`, `2130706433`) are not recognized.
+    private static func ipv4Octets(_ text: String) -> [Int]? {
+        let groups = text.split(separator: ".", omittingEmptySubsequences: false)
+        guard groups.count == 4 else { return nil }
+        var octets: [Int] = []
+        for group in groups {
+            let isDigits = group.utf8.allSatisfy { (0x30...0x39).contains($0) }
+            guard isDigits, group.count <= 3, group == "0" || !group.hasPrefix("0"), let value = Int(group), value <= 255
+            else { return nil }
+            octets.append(value)
+        }
+        return octets
     }
 }
