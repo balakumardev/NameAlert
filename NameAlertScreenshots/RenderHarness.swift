@@ -122,6 +122,51 @@ enum RenderHarness {
         try render(view, size: fittingSize(of: view, width: nil, appearance: appearance), name: name, appearance: appearance)
     }
 
+    /// Renders `view` at `size` points into an image of `scale` pixels per point and returns it instead of writing a
+    /// file, so that a picture can be built from it (the App Store screenshots). The scale is the one asked for, not
+    /// the screen's, and the pixels are sRGB, so the result is the same on every Mac. `wait` gives other actors time to
+    /// answer, as in `render(_:size:name:afterWaiting:)`; `prepare` runs once the view has settled and before it is
+    /// drawn, to undo what a view does by itself on appearing (taking the keyboard focus, say) or to read where things
+    /// are in the window.
+    ///
+    /// The view is hosted twice and the picture is of the second time. The first layout of a kind of view in a
+    /// process can come out differently from the ones after it (the first setup screen drew a segmented control wider
+    /// than its column); the second is the one the app shows from then on.
+    static func image<V: View>(
+        _ view: V, size: CGSize, scale: CGFloat = 2, appearance: NSAppearance.Name = .aqua,
+        afterWaiting wait: Duration = .zero, prepare: (@MainActor (NSWindow) -> Void)? = nil
+    ) async throws -> CGImage {
+        let name = "image"
+        let warmUp = try host(view, size: size, name: name, appearance: appearance)
+        settle(warmUp.view)
+        warmUp.window.contentView = nil
+
+        let hosted = try host(view, size: size, name: name, appearance: appearance)
+        settle(hosted.view)
+        if wait > .zero { try await Task.sleep(for: wait) }
+        settle(hosted.view)
+        if let prepare {
+            prepare(hosted.window)
+            settle(hosted.view)
+        }
+
+        let width = Int((size.width * scale).rounded()), height = Int((size.height * scale).rounded())
+        guard width >= 1, height >= 1,
+            let bitmap = NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8, samplesPerPixel: 4,
+                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+        else { throw RenderError.noBitmap(name) }
+        bitmap.size = size  // pixels / points = scale, whatever the screen's own scale is
+        hosted.view.cacheDisplay(in: hosted.view.bounds, to: bitmap)
+        hosted.window.contentView = nil
+
+        // A device RGB bitmap holds the sRGB numbers the view's colors have, so say so.
+        guard let cgImage = bitmap.cgImage, let srgb = CGColorSpace(name: CGColorSpace.sRGB),
+            let tagged = cgImage.copy(colorSpace: srgb)
+        else { throw RenderError.noBitmap(name) }
+        return tagged
+    }
+
     /// The size `view` asks for, at `width` if given, rounded up to whole points.
     static func fittingSize<V: View>(of view: V, width: CGFloat?, appearance: NSAppearance.Name = .aqua) -> CGSize {
         let controller = NSHostingController(rootView: view)
