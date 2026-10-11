@@ -80,9 +80,7 @@ private struct OnboardingFlow: View {
     }
 
     private var canContinue: Bool {
-        model.canContinue(
-            permissions: controller.permissions, required: controller.requiredPermissions(),
-            engineIsReady: EngineStepLogic.isReady(model.resolution, installed: controller.installedModels))
+        model.canContinue(permissions: controller.permissions, required: controller.requiredPermissions())
     }
 
     // MARK: Footer
@@ -107,12 +105,12 @@ private struct OnboardingFlow: View {
                     .controlSize(.large)
                     .accessibilityLabel("Done")
             } else {
-                Button("Continue", action: advance)
+                Button(model.continueTitle, action: advance)
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .disabled(!canContinue)
-                    .accessibilityLabel("Continue")
+                    .accessibilityLabel(model.continueTitle)
             }
         }
         .padding(.horizontal, 20)

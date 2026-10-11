@@ -96,6 +96,22 @@ struct SettingsRenderTests {
         try RenderHarness.render(view, size: settingsSize, name: "settings-rules-long")
     }
 
+    @Test("A channel that is on but no longer set up stays a box that can be unchecked", arguments: [false, true])
+    func rulesChannelThatWasSetUp(dark: Bool) throws {
+        var configuration = DemoFixtures.settingsConfiguration
+        // ntfy and the webhook are on for the first rule, and neither has an address any more.
+        configuration.rules[0].channels = [.sound, .notification, .ntfy, .webhook]
+        #expect(!configuration.channels.isConfigured(.ntfy))
+        #expect(!configuration.channels.isConfigured(.webhook))
+        let view = SettingsRenderFrame {
+            SettingsView(section: .rules)
+                .environment(DemoFixtures.controller(.off, configuration: configuration))
+        }
+        try RenderHarness.render(
+            view, size: CGSize(width: 760, height: 980), name: "settings-rules-unconfigured-checked" + (dark ? "-dark" : ""),
+            appearance: dark ? .darkAqua : .aqua)
+    }
+
     @Test("Rules with no rules renders its empty state")
     func rulesEmpty() throws {
         var configuration = DemoFixtures.settingsConfiguration
@@ -551,6 +567,15 @@ struct AlertsAndSpeechLogicTests {
         #expect(AddressCheck.message(for: "ftp://example.com") == AddressCheck.incompleteHint)
         #expect(AddressCheck.isUsable("https://example.com"))
         #expect(!AddressCheck.isUsable("http://example.com"))
+    }
+
+    @Test("A channel that is not set up cannot be turned on, but one that is on can always be turned off")
+    func channelCheckboxes() {
+        #expect(!RuleEditorView.isChannelDisabled(isConfigured: true, isChecked: false))
+        #expect(!RuleEditorView.isChannelDisabled(isConfigured: true, isChecked: true))
+        #expect(RuleEditorView.isChannelDisabled(isConfigured: false, isChecked: false))
+        // Its address was cleared after it was checked: the box stays usable, so that it can be unchecked.
+        #expect(!RuleEditorView.isChannelDisabled(isConfigured: false, isChecked: true))
     }
 
     @Test("A header name has no spaces or colons, and is not added twice")

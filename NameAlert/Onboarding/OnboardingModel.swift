@@ -120,16 +120,26 @@ final class OnboardingModel {
 
     // MARK: Moving
 
-    /// Whether "Continue" is on for the step. `required` are the permissions listening needs, `engineIsReady` whether a
-    /// speech engine is ready to listen.
-    func canContinue(permissions: PermissionsSnapshot, required: [PermissionKind], engineIsReady: Bool) -> Bool {
+    /// Whether "Continue" is on for the step. `required` are the permissions listening needs.
+    ///
+    /// The speech engine step is never held up: when the engine is not ready (the local model cannot be downloaded
+    /// because the Mac is offline, say) there is nothing to test, and when it is, the test may never hear the name.
+    /// Listening tries again once setup is done, and says what is missing if it still cannot.
+    func canContinue(permissions: PermissionsSnapshot, required: [PermissionKind]) -> Bool {
         switch step {
-        case .welcome, .source, .finish: true
+        case .welcome, .source, .engine, .finish: true
         case .permissions: required.allSatisfy { permissions[$0] == .granted }
         case .name: !trimmedName.isEmpty
-        case .engine: engineIsReady
         }
     }
+
+    /// What the button that goes on says. On the engine step it says what going on means until the test has heard the
+    /// name: "Continue without testing".
+    var continueTitle: String {
+        step == .engine && heard == nil ? Self.continueWithoutTesting : "Continue"
+    }
+
+    static let continueWithoutTesting = "Continue without testing"
 
     /// Saves the choices of the step that is left, and goes to the next one. A second call while the first is still
     /// saving, or just after a move, does nothing, so a double click does not skip a step.

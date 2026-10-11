@@ -35,10 +35,11 @@ struct NameStep: View {
                         emptyPrompt: Self.variantsPrompt)
                 }
 
-                HStack(alignment: .top, spacing: 24) {
-                    sensitivity
-                    alerts
-                }
+                // Each on a row of its own: the three-part Sensitivity picker needs about 240 points, more than a column
+                // beside the alert choices has.
+                sensitivity
+
+                alerts
             }
         }
         .task {
@@ -69,11 +70,12 @@ struct NameStep: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityLabel("Sensitivity")
                 SettingsCaption(RuleEditorView.explanation(for: model.sensitivity))
             }
         }
-        .frame(width: 210, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private var alerts: some View {

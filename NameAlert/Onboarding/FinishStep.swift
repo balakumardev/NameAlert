@@ -1,9 +1,13 @@
+import NameAlertRuntime
+import ServiceManagement
 import SwiftUI
 
-/// Step 6: where the app is now. A picture of the menu bar with the icon marked, and an arrow toward it.
+/// Step 6: where the app is now. A picture of the menu bar with the icon marked, an arrow toward it, and the choice to
+/// open at login.
 struct FinishStep: View {
     static var headline: String { "\(AppInfo.displayName) lives in your menu bar." }
     static let details = ["Click the ear to pause, snooze or see what it heard.", "Settings are in the same menu."]
+    static let openAtLoginTitle = "Open at login"
 
     var body: some View {
         VStack(spacing: 14) {
@@ -22,10 +26,89 @@ struct FinishStep: View {
             .font(.callout)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
+            OpenAtLoginChoice()
+                .padding(.top, 2)
         }
         .padding(.horizontal, 40)
         .padding(.top, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// "Open at login" on the last step: off until it is turned on, and the same login item as Settings → General's. When
+/// the system wants the user to approve it, or could not change it, it says so under the checkbox.
+private struct OpenAtLoginChoice: View {
+    @Environment(\.loginItem) private var loginItem
+    @Environment(ListeningController.self) private var controller
+
+    @State private var status: SMAppService.Status = .notRegistered
+    @State private var failure: String?
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Toggle(FinishStep.openAtLoginTitle, isOn: binding)
+                .toggleStyle(.checkbox)
+                .accessibilityLabel(FinishStep.openAtLoginTitle)
+            if LoginItemLogic.needsApproval(status) {
+                VStack(spacing: 4) {
+                    Text(verbatim: "Allow \(AppInfo.displayName) in System Settings → General → Login Items.")
+                    Button("Open Login Items") { loginItem.openSystemSettings() }
+                        .controlSize(.small)
+                        .accessibilityLabel("Open Login Items in System Settings")
+                }
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            }
+            if let failure {
+                Text(verbatim: failure)
+                    .font(.callout)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .onAppear(perform: refresh)
+    }
+
+    private var binding: Binding<Bool> {
+        Binding(
+            get: { LoginItemLogic.isOn(status) },
+            set: { wanted in
+                let outcome = Self.turn(wanted, using: loginItem)
+                status = outcome.status
+                failure = outcome.failure
+                remember(LoginItemLogic.isOn(outcome.status))
+            })
+    }
+
+    /// Reads what the system says now (the user may have set the login item in System Settings before).
+    private func refresh() {
+        status = loginItem.status
+        remember(LoginItemLogic.isOn(status))
+    }
+
+    /// Keeps the saved setting in step with the login item, as Settings → General does.
+    private func remember(_ isOn: Bool) {
+        guard controller.configuration.general.launchAtLogin != isOn else { return }
+        controller.edit { $0.general.launchAtLogin = isOn }
+    }
+
+    /// Turns the login item on or off. Returns how it stands afterwards, and what to tell the user if that did not work.
+    static func turn(
+        _ wanted: Bool, using service: any LoginItemService
+    ) -> (status: SMAppService.Status, failure: String?) {
+        let failure = LoginItemLogic.change(to: wanted, using: service)
+        return (service.status, failure)
+    }
+}
+
+extension FinishStep {
+    /// What turning "Open at login" on or off does, for the tests.
+    static func openAtLogin(
+        _ wanted: Bool, using service: any LoginItemService
+    ) -> (status: SMAppService.Status, failure: String?) {
+        OpenAtLoginChoice.turn(wanted, using: service)
     }
 }
 

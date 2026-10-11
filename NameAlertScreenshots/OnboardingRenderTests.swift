@@ -42,12 +42,13 @@ struct OnboardingRenderTests {
 
     private func render(
         _ step: OnboardingModel.Step, name: String, dark: Bool, controller: ListeningController,
-        model: OnboardingModel? = nil
+        model: OnboardingModel? = nil, loginItem: FakeLoginItem = FakeLoginItem(status: .notRegistered)
     ) async throws {
         let view = SettingsRenderFrame {
             OnboardingView(presetModel: model ?? self.model(step))
                 .environment(controller)
                 .environment(WindowRouter())
+                .environment(\.loginItem, loginItem)
         }
         try await RenderHarness.render(
             view, size: OnboardingView.size, name: name + suffix(dark), appearance: appearance(dark),
@@ -128,6 +129,33 @@ struct OnboardingRenderTests {
         try await render(.name, name: "onboarding-4-name-other", dark: false, controller: controller, model: other)
     }
 
+    @Test("4 Your name: Sensitivity has a row of its own, as wide as it needs, with nothing on top of it")
+    func sensitivityHasItsOwnRow() async throws {
+        let view = SettingsRenderFrame {
+            OnboardingView(presetModel: self.model(.name, filled: true))
+                .environment(DemoFixtures.controller(.off, configuration: freshConfiguration))
+                .environment(WindowRouter())
+        }
+        var geometry: SegmentedControlGeometry?
+        _ = try await RenderHarness.image(
+            view, size: OnboardingView.size, scale: 1, afterWaiting: settleTime
+        ) { window in
+            geometry = SegmentedControlGeometry(in: window)
+        }
+        let found = try #require(geometry, "No segmented control in the name step")
+        // The three parts need about 240 points; squeezed into a narrower column, the control overflows it.
+        #expect(found.frame.width >= found.needed.width, "The picker has \(found.frame.width) points, needs \(found.needed.width)")
+        #expect(found.needed.width >= 230, "The picker is about 240 points wide: \(found.needed.width)")
+        // Inside the step's side padding.
+        #expect(found.frame.minX >= 0 && found.frame.maxX <= OnboardingView.size.width - 40 + 1, "\(found.frame)")
+        // Nothing else is on the picker: not the alert choices, not a text field. Containers around it do not count.
+        #expect(found.overlapping.isEmpty, "On the picker: \(found.overlapping)")
+        // The alert choices (focusable controls, drawn by SwiftUI) are below it, not beside it.
+        let below = found.others.filter { $0.frame.minY >= found.frame.maxY && $0.frame.maxY < OnboardingView.size.height - 60 }
+        #expect(!below.isEmpty, "The alert choices should be under the picker")
+        #expect(below.allSatisfy { $0.frame.minY > found.frame.maxY }, "The picker's row is its own")
+    }
+
     @Test("5 Speech engine renders a local model that is being downloaded", arguments: [false, true])
     func engineDownloading(dark: Bool) async throws {
         var configuration = configurationWithMyName
@@ -193,11 +221,24 @@ struct OnboardingRenderTests {
             .engine, name: "onboarding-5-engine-problem", dark: false, controller: denied, model: problem)
     }
 
-    @Test("6 All set renders", arguments: [false, true])
+    @Test("6 All set renders, with Open at login off", arguments: [false, true])
     func finish(dark: Bool) async throws {
         try await render(
             .finish, name: "onboarding-6-finish", dark: dark,
-            controller: DemoFixtures.controller(.listening(DemoFixtures.listeningInfo), configuration: configurationWithMyName))
+            controller: DemoFixtures.controller(.listening(DemoFixtures.listeningInfo), configuration: configurationWithMyName),
+            loginItem: FakeLoginItem(status: .notRegistered))
+    }
+
+    @Test("6 All set renders with Open at login on, and waiting for the user's approval")
+    func finishLoginStates() async throws {
+        let controller = DemoFixtures.controller(
+            .listening(DemoFixtures.listeningInfo), configuration: configurationWithMyName)
+        try await render(
+            .finish, name: "onboarding-6-finish-login-on", dark: false, controller: controller,
+            loginItem: FakeLoginItem(status: .enabled))
+        try await render(
+            .finish, name: "onboarding-6-finish-login-approval", dark: false, controller: controller,
+            loginItem: FakeLoginItem(status: .requiresApproval))
     }
 }
 
@@ -263,6 +304,30 @@ struct OnboardingLogicTests {
         #expect(OnboardingModel.offeredChannels.map(\.displayName) == [
             "Sound", "Notification", "Alarm until dismissed", "Screen flash",
         ])
+    }
+
+    @Test("Setup ends with an Open at login choice that is off until it is turned on, and says when it cannot be")
+    func openAtLogin() {
+        let service = FakeLoginItem(status: .notRegistered)
+        #expect(FinishStep.openAtLoginTitle == "Open at login")
+        #expect(!LoginItemLogic.isOn(service.status), "Off by default")
+        let on = FinishStep.openAtLogin(true, using: service)
+        #expect(on.status == .enabled)
+        #expect(on.failure == nil)
+        #expect(service.status == .enabled)
+        let off = FinishStep.openAtLogin(false, using: service)
+        #expect(off.status == .notRegistered)
+        #expect(off.failure == nil)
+        // The system wants the user's approval: it counts as on, and the step points to Login Items.
+        let waiting = FakeLoginItem(status: .requiresApproval)
+        #expect(LoginItemLogic.isOn(waiting.status))
+        #expect(LoginItemLogic.needsApproval(waiting.status))
+        // The system refuses.
+        service.registrationError = NSError(
+            domain: "SMAppServiceErrorDomain", code: 1, userInfo: [NSLocalizedDescriptionKey: "Operation not permitted"])
+        let refused = FinishStep.openAtLogin(true, using: service)
+        #expect(refused.status == .notRegistered)
+        #expect(refused.failure == "Couldn't turn on Open at login: Operation not permitted")
     }
 
     @Test("The finish says where the app lives, and its illustration's symbols exist")
@@ -350,30 +415,54 @@ struct OnboardingLogicTests {
             microphone: .notDetermined, screenRecording: .denied, speechRecognition: .notDetermined, notifications: .notDetermined)
         for step in [OnboardingModel.Step.welcome, .source, .finish] {
             model.step = step
-            #expect(model.canContinue(permissions: none, required: [.screenRecording], engineIsReady: false), "\(step)")
+            #expect(model.canContinue(permissions: none, required: [.screenRecording]), "\(step)")
         }
 
         model.step = .permissions
-        #expect(!model.canContinue(permissions: none, required: [.screenRecording], engineIsReady: false))
-        #expect(model.canContinue(permissions: allowed, required: [.screenRecording, .microphone], engineIsReady: false))
+        #expect(!model.canContinue(permissions: none, required: [.screenRecording]))
+        #expect(model.canContinue(permissions: allowed, required: [.screenRecording, .microphone]))
         // Only what is required counts: notifications are a recommendation.
         var noNotifications = allowed
         noNotifications.notifications = .denied
-        #expect(model.canContinue(permissions: noNotifications, required: [.screenRecording], engineIsReady: false))
+        #expect(model.canContinue(permissions: noNotifications, required: [.screenRecording]))
         var noMicrophone = allowed
         noMicrophone.microphone = .denied
-        #expect(!model.canContinue(permissions: noMicrophone, required: [.screenRecording, .microphone], engineIsReady: false))
+        #expect(!model.canContinue(permissions: noMicrophone, required: [.screenRecording, .microphone]))
 
         model.step = .name
-        #expect(!model.canContinue(permissions: allowed, required: [], engineIsReady: true))
+        #expect(!model.canContinue(permissions: allowed, required: []))
         model.name = "   "
-        #expect(!model.canContinue(permissions: allowed, required: [], engineIsReady: true))
+        #expect(!model.canContinue(permissions: allowed, required: []))
         model.name = " Bala "
-        #expect(model.canContinue(permissions: allowed, required: [], engineIsReady: false))
+        #expect(model.canContinue(permissions: allowed, required: []))
 
+        // The engine step is never held up: offline, with the local model out of reach, there is nothing to test.
         model.step = .engine
-        #expect(!model.canContinue(permissions: allowed, required: [], engineIsReady: false))
-        #expect(model.canContinue(permissions: allowed, required: [], engineIsReady: true))
+        #expect(model.canContinue(permissions: none, required: [.screenRecording]))
+        #expect(model.canContinue(permissions: allowed, required: []))
+    }
+
+    @Test("On the engine step the button says it goes on without testing, until the name was heard")
+    func continueWithoutTesting() {
+        let model = OnboardingModel(configuration: freshConfiguration)
+        for step in OnboardingModel.Step.allCases where step != .engine {
+            model.step = step
+            #expect(model.continueTitle == "Continue", "\(step)")
+        }
+        model.step = .engine
+        #expect(model.continueTitle == "Continue without testing")
+        model.heard = "Bala"
+        #expect(model.continueTitle == "Continue")
+        model.heard = nil
+        #expect(model.continueTitle == "Continue without testing", "Going back to the test starts it again")
+    }
+
+    @Test("Leaving the engine step without a ready engine goes on to the end of setup")
+    func leavingWithoutAnEngine() async {
+        let model = OnboardingModel(configuration: freshConfiguration, step: .engine)
+        let controller = makeController()
+        await model.advance(using: controller, supportsCalls: true)
+        #expect(model.step == .finish)
     }
 
     @Test("Leaving the source step saves what to listen to; calls are left alone where they cannot be told")
@@ -682,5 +771,53 @@ struct OnboardingLogicTests {
             let smallest = NSHostingController(rootView: view).sizeThatFits(in: .zero)
             #expect(smallest == OnboardingView.size, "\(step) can shrink to \(smallest)")
         }
+    }
+}
+
+/// Where the segmented control of a hosted view is, how big it needs to be, and which other views are on top of it, in
+/// points from the top left of the window.
+struct SegmentedControlGeometry {
+    let frame: CGRect
+    /// What the control asks for.
+    let needed: CGSize
+    /// Every view that is not the control, inside it, or a container that surrounds it.
+    let others: [(type: String, frame: CGRect)]
+
+    /// The views that overlap the control without surrounding it.
+    var overlapping: [String] {
+        others.filter { $0.frame.intersects(frame) && $0.frame.width > 0 && $0.frame.height > 0 }
+            .map { "\($0.type) \($0.frame)" }
+    }
+
+    /// `nil` when the window shows no segmented control.
+    @MainActor
+    init?(in window: NSWindow) {
+        guard let root = window.contentView else { return nil }
+        func frame(of view: NSView) -> CGRect {
+            var frame = view.convert(view.bounds, to: root)
+            if !root.isFlipped { frame.origin.y = root.bounds.height - frame.maxY }
+            return frame
+        }
+        var control: NSSegmentedControl?
+        func find(_ view: NSView) {
+            if control == nil, let found = view as? NSSegmentedControl { control = found }
+            view.subviews.forEach(find)
+        }
+        find(root)
+        guard let control else { return nil }
+        let controlFrame = frame(of: control)
+
+        var others: [(type: String, frame: CGRect)] = []
+        func collect(_ view: NSView) {
+            if view === control { return }
+            let viewFrame = frame(of: view)
+            // A container around the control (the window's own view, the host the control sits in) is not on top of it.
+            if !viewFrame.contains(controlFrame) { others.append((String(describing: type(of: view)), viewFrame)) }
+            view.subviews.forEach(collect)
+        }
+        collect(root)
+        self.frame = controlFrame
+        self.needed = control.fittingSize
+        self.others = others
     }
 }

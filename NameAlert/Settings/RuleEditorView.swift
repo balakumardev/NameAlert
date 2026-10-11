@@ -110,7 +110,7 @@ struct RuleEditorView: View {
                     })
             )
             .toggleStyle(.checkbox)
-            .disabled(!isConfigured)
+            .disabled(Self.isChannelDisabled(isConfigured: isConfigured, isChecked: rule.channels.contains(kind)))
             .accessibilityLabel("Alert with \(kind.displayName)")
             Spacer(minLength: 8)
             if !isConfigured {
@@ -121,6 +121,12 @@ struct RuleEditorView: View {
                     .accessibilityLabel("Set up \(kind.displayName) in Alerts")
             }
         }
+    }
+
+    /// Whether a channel's checkbox is unavailable: a channel that is not set up cannot be turned on, but one that is on
+    /// and has stopped being set up (its address was cleared) can always be turned off.
+    static func isChannelDisabled(isConfigured: Bool, isChecked: Bool) -> Bool {
+        !isConfigured && !isChecked
     }
 
     // MARK: Cooldown
