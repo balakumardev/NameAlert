@@ -13,17 +13,28 @@ private let tokenRows: [(String, [String])] = [
     ("stand-up at 10", ["stand", "up", "at", "10"]),
     ("", []),
     ("!!! \u{1F642}", []),  // punctuation and an emoji are not words
+    // Contractions (spec section 6): an apostrophe between two letters is dropped, it does not split the word.
+    ("I don't know", ["i", "dont", "know"]),
+    ("O\u{2019}Brien called", ["obrien", "called"]),
+    ("Bala's deck", ["bala", "deck"]),  // a possessive is still dropped
 ]
 
-/// Beyond the table: accents written as separate marks, full-width letters, and where a possessive does not apply.
+/// Beyond the table: accents written as separate marks, full-width letters, where a possessive does not apply and
+/// where an apostrophe does not sit between two letters.
 private let tokenEdgeRows: [(String, [String])] = [
     ("Cafe\u{0301} Mu\u{0308}ller", ["cafe", "muller"]),  // accents as combining marks stay inside their word
     ("\u{FF22}\u{FF21}\u{FF2C}\u{FF21}", ["bala"]),  // full-width capitals
     ("BALA'S deck", ["bala", "deck"]),  // possessive in capitals
     ("10's", ["10", "s"]),  // only a letter may precede the 's
-    ("Bala'sh", ["bala", "sh"]),  // the 's must end the word
+    ("Bala'sh", ["balash"]),  // the 's must end the word to be a possessive, otherwise it is a contraction
     ("Bala 's", ["bala", "s"]),  // and sit right after the letter
     ("'s", ["s"]),
+    ("Cafe\u{0301}'s", ["cafe"]),  // a possessive may follow an accent written as a separate mark
+    ("don\u{2019}t", ["dont"]),  // typographic apostrophe
+    ("rock'n'roll", ["rocknroll"]),  // more than one apostrophe in a word
+    ("O\u{2019}Brien\u{2019}s", ["obrien"]),  // a contraction, then a possessive
+    ("'tis the dogs' toys", ["tis", "the", "dogs", "toys"]),  // an apostrophe at either end of a word is a separator
+    ("rock'80s", ["rock", "80s"]),  // and so is one next to a digit
     ("\u{0301}Bala", ["bala"]),  // a lone combining mark is not a word
     ("Stra\u{00DF}e", ["strasse"]),  // case folding, not just lowercasing
 ]
@@ -136,6 +147,7 @@ struct MatchingPrimitivesTests {
     @Test func normalizeTermSplitsLikeText() {
         #expect(TextNormalizer.normalizeTerm("  Stand-Up ") == ["stand", "up"])
         #expect(TextNormalizer.normalizeTerm("Bala") == ["bala"])
+        #expect(TextNormalizer.normalizeTerm("Don't") == ["dont"])
     }
 
     @Test(arguments: ["", "   ", "!!!", "-", "\u{1F642}"])
@@ -149,6 +161,13 @@ struct MatchingPrimitivesTests {
         #expect(tokens.count == 2)
         #expect(String(text[tokens[1].range]) == "Bala")
         #expect(tokens[1].normalized == "bala")
+    }
+
+    @Test func tokenRangeIncludesTheApostropheOfAContraction() {
+        let text = "I don't know"
+        let tokens = TextNormalizer.tokenize(text)
+        #expect(tokens.map(\.normalized) == ["i", "dont", "know"])
+        #expect(tokens.map { String(text[$0.range]) } == ["I", "don't", "know"])
     }
 
     @Test func tokenRangeKeepsOriginalCasingAndLeavesOutThePossessive() {
