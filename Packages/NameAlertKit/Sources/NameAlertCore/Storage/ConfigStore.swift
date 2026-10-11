@@ -3,15 +3,18 @@ import os
 
 /// Loads and saves `config.json`.
 ///
-/// Loading never fails, never writes `config.json` and never loses what is in it. A missing file gives the
-/// defaults. A file that cannot be used (it is unreadable, is not valid JSON, or was written by a newer version of
-/// the app) is kept as `config.corrupt-<yyyyMMdd-HHmmss>.json` beside it, so the user's rules are never lost
-/// silently, and the defaults are returned. A file that loads but had rules that could not be read (a rule without
-/// a name or terms, or a `rules` that is not a list) is kept the same way, and what could be read is returned. The
-/// file is copied; when it cannot be copied (an unreadable file cannot) it is moved instead. If it can be neither
-/// copied nor moved, this store never writes, because the next write would replace a file nobody has a copy of.
-/// `save` still takes the values and keeps the latest in memory. Call `load()` once at startup, before the first
-/// `save`.
+/// Loading never fails, never loses what is in `config.json` and does not write it before it returns. A missing file
+/// gives the defaults. A file that cannot be used (it is unreadable, is not valid JSON, or was written by a newer
+/// version of the app) is kept as `config.corrupt-<yyyyMMdd-HHmmss>.json` beside it, so the user's rules are never
+/// lost silently, and the defaults are returned. A file that loads but had rules that could not be read (a rule
+/// without a name or terms, or a `rules` that is not a list) is kept the same way, and what could be read is
+/// returned. The file is copied; when it cannot be copied (an unreadable file cannot) it is moved instead. If it can
+/// be neither copied nor moved, this store never writes, because the next write would replace a file nobody has a
+/// copy of; `save` still takes the values and keeps the latest in memory.
+///
+/// Once a file has been kept, `load()` schedules an ordinary save of the configuration it returns. Otherwise
+/// `config.json` would stay the file that needed a backup, and every launch would keep another copy of it. Call
+/// `load()` once at startup, before the first `save`.
 ///
 /// Writing is debounced and atomic. `save` keeps only the latest value and writes it once, `debounce` after the
 /// first save of a burst; `flush()` writes right away. A failed write is logged, never fatal, and the value stays
@@ -45,6 +48,9 @@ public actor ConfigStore {
     /// reads it, with defaults for the fields it could not make sense of; if that dropped rules, the file is kept
     /// as well (see the type comment).
     ///
+    /// Whenever a file was kept, the configuration returned is also scheduled to be saved, like any other `save`,
+    /// unless writes are suspended.
+    ///
     /// This is always the file as it is on disk: a `save` that has not been written yet is not included.
     public func load() -> AppConfiguration {
         let data: Data
@@ -67,6 +73,7 @@ public actor ConfigStore {
             if let lost = Self.describeLostRules(in: data, decoded: configuration, decoder: decoder) {
                 // What was readable is used, but the next save writes only that: keep the whole file first.
                 keepFile(because: lost, andStartFrom: "what could be read")
+                scheduleNormalizingSave(of: configuration)
             }
             return configuration
         } catch {
@@ -92,7 +99,20 @@ public actor ConfigStore {
     /// Keeps the unusable file (see `keepFile`) and returns the defaults to start from.
     private func setAside(because reason: String) -> AppConfiguration {
         keepFile(because: reason, andStartFrom: "defaults")
-        return AppConfiguration()
+        let defaults = AppConfiguration()
+        scheduleNormalizingSave(of: defaults)
+        return defaults
+    }
+
+    /// Called once a file has been kept. `config.json` is still that file, or is gone, so the configuration that
+    /// `load()` returns is saved the usual way: after the debounce, or at the next `flush()`. The next load then
+    /// finds a file that needs no backup, instead of keeping another copy of the same one.
+    ///
+    /// Nothing is scheduled while writes are suspended: the file could not be kept, and a write would replace it. A
+    /// value that was saved before `load()` stays the one to write, as it is newer than what was just read.
+    private func scheduleNormalizingSave(of configuration: AppConfiguration) {
+        guard !writesAreSuspended else { return }
+        save(pending ?? configuration)
     }
 
     /// Keeps the file the user had as a new `config.corrupt-…` file beside it, so that nothing in it is lost when the

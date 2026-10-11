@@ -16,6 +16,11 @@ struct ConfigStoreTests {
         return try await body(directory)
     }
 
+    /// A debounce that never runs out during a test, for the tests that only look at what `load()` leaves on disk.
+    /// After a backup `load()` schedules a save. A short debounce would let it write between two of a test's checks,
+    /// or into the test's folder after the test has removed it.
+    private let neverWithinATest = Duration.seconds(3600)
+
     private func exists(_ url: URL) -> Bool {
         FileManager.default.fileExists(atPath: url.path)
     }
@@ -105,7 +110,7 @@ struct ConfigStoreTests {
             let original = Data("{not json".utf8)
             try original.write(to: file)
 
-            let loaded = await ConfigStore(fileURL: file).load()
+            let loaded = await ConfigStore(fileURL: file, debounce: neverWithinATest).load()
             #expect(loaded == AppConfiguration())
 
             let found = try backups(in: directory)
@@ -136,7 +141,7 @@ struct ConfigStoreTests {
             let file = directory.appendingPathComponent("config.json")
             try original.write(to: file)
 
-            let loaded = await ConfigStore(fileURL: file).load()
+            let loaded = await ConfigStore(fileURL: file, debounce: neverWithinATest).load()
             #expect(loaded == AppConfiguration())
 
             let found = try backups(in: directory)
@@ -159,7 +164,7 @@ struct ConfigStoreTests {
 
             // The OS refuses the read, and so the copy for the backup. A file can still be renamed, which keeps the
             // user's bytes: the file is moved aside, the defaults load, and the store is free to write a new config.
-            let store = ConfigStore(fileURL: file, debounce: .milliseconds(10))
+            let store = ConfigStore(fileURL: file, debounce: neverWithinATest)
             let loaded = await store.load()
             #expect(loaded == AppConfiguration())
             #expect(!exists(file))
@@ -237,7 +242,7 @@ struct ConfigStoreTests {
             try original.write(to: file)
 
             // The rest of the file loads, but the next save would leave out whatever `rules` held: it is kept first.
-            let loaded = await ConfigStore(fileURL: file).load()
+            let loaded = await ConfigStore(fileURL: file, debounce: neverWithinATest).load()
             #expect(loaded.listening.source == .microphone)
             #expect(loaded.rules.isEmpty)
             let found = try backups(in: directory)
@@ -256,7 +261,7 @@ struct ConfigStoreTests {
             try original.write(to: file)
 
             // The rule that can be read is used, but the next save would drop the other one: the file is kept first.
-            let loaded = await ConfigStore(fileURL: file).load()
+            let loaded = await ConfigStore(fileURL: file, debounce: neverWithinATest).load()
             #expect(loaded.rules.map(\.name) == ["keep"])
             let found = try backups(in: directory)
             #expect(found.count == 1, "\(broken)")
@@ -283,7 +288,7 @@ struct ConfigStoreTests {
             try original.write(to: file)
 
             // The rule would decode fine, but a newer app wrote this file: it is set aside, not half-read.
-            let loaded = await ConfigStore(fileURL: file).load()
+            let loaded = await ConfigStore(fileURL: file, debounce: neverWithinATest).load()
             #expect(loaded == AppConfiguration())
 
             let found = try backups(in: directory)
@@ -300,7 +305,7 @@ struct ConfigStoreTests {
         try await inTemporaryDirectory { directory in
             let file = directory.appendingPathComponent("config.json")
             try Data(#"{"schemaVersion":\#(version)}"#.utf8).write(to: file)
-            let loaded = await ConfigStore(fileURL: file).load()
+            let loaded = await ConfigStore(fileURL: file, debounce: neverWithinATest).load()
             #expect(loaded == AppConfiguration())
             #expect(try backups(in: directory).count == 1)
         }
@@ -309,7 +314,7 @@ struct ConfigStoreTests {
     @Test func everyCorruptLoadKeepsItsOwnBackup() async throws {
         try await inTemporaryDirectory { directory in
             let file = directory.appendingPathComponent("config.json")
-            let store = ConfigStore(fileURL: file)
+            let store = ConfigStore(fileURL: file, debounce: neverWithinATest)
             let payloads = ["{one", "{two", "{three"].map { Data($0.utf8) }
             for payload in payloads {
                 try payload.write(to: file)
@@ -341,6 +346,145 @@ struct ConfigStoreTests {
             try Data("two".utf8).write(to: second)
             let third = ConfigStore.backupURL(in: directory, date: date)
             #expect(third.lastPathComponent == "config.corrupt-20261011-090503-2.json")
+        }
+    }
+
+    // MARK: After a backup
+
+    // A backup leaves config.json as it was, or takes it away. Without a write after it, every launch would find the
+    // same file again and keep one more backup of it. So `load()` follows a backup with a normal, debounced save of
+    // the configuration it returns.
+
+    @Test func backupIsFollowedByOneNormalizingSave() async throws {
+        try await inTemporaryDirectory { directory in
+            let file = directory.appendingPathComponent("config.json")
+            let original = Data("{not json".utf8)
+            try original.write(to: file)
+
+            let store = ConfigStore(fileURL: file, debounce: .seconds(60))
+            let loaded = await store.load()
+            #expect(loaded == AppConfiguration())
+            #expect(try backups(in: directory).count == 1)
+            #expect(try Data(contentsOf: file) == original)  // a save, so deferred: nothing is written yet
+
+            await store.flush()
+            #expect(try readConfiguration(at: file) == loaded)
+            #expect(try backups(in: directory).count == 1)
+
+            // The next launch finds a good file, and keeps nothing more.
+            let relaunched = await ConfigStore(fileURL: file).load()
+            #expect(relaunched == loaded)
+            #expect(try backups(in: directory).count == 1)
+
+            // That was the one write: the save was used up, and flushing again does not repeat it.
+            try FileManager.default.removeItem(at: file)
+            await store.flush()
+            #expect(!exists(file))
+        }
+    }
+
+    @Test(arguments: [
+        #"{"schemaVersion":2,"rules":[{"name":"keep","terms":["k"]}]}"#,  // written by a newer version
+        #"{"rules":[{"name":"keep","terms":["k"]},{"name":"broken"}]}"#,  // a rule that cannot be read
+        #"{"rules":"oops","listening":{"source":"microphone"}}"#,  // rules that are not a list
+    ])
+    func everyKindOfBackupIsFollowedByANormalizingSave(json: String) async throws {
+        try await inTemporaryDirectory { directory in
+            let file = directory.appendingPathComponent("config.json")
+            try Data(json.utf8).write(to: file)
+
+            let store = ConfigStore(fileURL: file, debounce: .seconds(60))
+            let loaded = await store.load()
+            await store.flush()
+            // What was read is what is written, so the next launch reads a file that has nothing left out.
+            #expect(try readConfiguration(at: file) == loaded, "\(json)")
+
+            let relaunched = await ConfigStore(fileURL: file).load()
+            #expect(relaunched == loaded, "\(json)")
+            #expect(try backups(in: directory).count == 1, "\(json)")
+        }
+    }
+
+    @Test(.enabled(if: getuid() != 0, "root can read any file"))
+    func aFileThatWasMovedAsideIsFollowedByANormalizingSave() async throws {
+        try await inTemporaryDirectory { directory in
+            let file = directory.appendingPathComponent("config.json")
+            try Data("{not json".utf8).write(to: file)
+            try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: file.path)
+            defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path) }
+            // Some file systems ignore permission bits. Then there is nothing to test.
+            guard !FileManager.default.isReadableFile(atPath: file.path) else { return }
+
+            let store = ConfigStore(fileURL: file, debounce: .seconds(60))
+            let loaded = await store.load()
+            #expect(!exists(file))  // moved, not copied
+            #expect(try backups(in: directory).count == 1)
+
+            await store.flush()
+            #expect(try readConfiguration(at: file) == loaded)
+            let relaunched = await ConfigStore(fileURL: file).load()
+            #expect(relaunched == loaded)
+            #expect(try backups(in: directory).count == 1)
+        }
+    }
+
+    @Test func theNormalizingSaveIsDebouncedLikeAnyOther() async throws {
+        try await inTemporaryDirectory { directory in
+            let file = directory.appendingPathComponent("config.json")
+            let original = Data("{not json".utf8)
+            try original.write(to: file)
+
+            let store = ConfigStore(fileURL: file, debounce: .milliseconds(150))
+            let loaded = await store.load()
+            #expect(try Data(contentsOf: file) == original)
+
+            // Nobody flushes: the timer writes it, once.
+            let written = await waitUntil { (try? readConfiguration(at: file)) == loaded }
+            #expect(written)
+            try FileManager.default.removeItem(at: file)
+            try await Task.sleep(for: .milliseconds(500))
+            #expect(!exists(file))
+        }
+    }
+
+    @Test func aFileThatNeededNoBackupIsNotWrittenBack() async throws {
+        try await inTemporaryDirectory { directory in
+            let file = directory.appendingPathComponent("config.json")
+
+            // No file: loading and flushing still create nothing.
+            let first = ConfigStore(fileURL: file, debounce: .milliseconds(10))
+            _ = await first.load()
+            await first.flush()
+            try await Task.sleep(for: .milliseconds(100))
+            #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty)
+
+            // A good file is left as it is, byte for byte.
+            let original = Data(#"{"rules":[{"name":"keep","terms":["k"]}]}"#.utf8)
+            try original.write(to: file)
+            let fileNumberBefore = try fileNumber(of: file)
+            let second = ConfigStore(fileURL: file, debounce: .milliseconds(10))
+            _ = await second.load()
+            await second.flush()
+            try await Task.sleep(for: .milliseconds(100))
+            #expect(try Data(contentsOf: file) == original)
+            #expect(try fileNumber(of: file) == fileNumberBefore)
+            #expect(try backups(in: directory).isEmpty)
+        }
+    }
+
+    @Test func aSaveMadeBeforeLoadIsNotReplacedByTheNormalizingSave() async throws {
+        try await inTemporaryDirectory { directory in
+            let file = directory.appendingPathComponent("config.json")
+            try Data("{not json".utf8).write(to: file)
+            let newer = makeConfiguration(ruleNamed: "newer")
+
+            // load() is meant to run before the first save. If it does not, the newer value is still the one written.
+            let store = ConfigStore(fileURL: file, debounce: .seconds(60))
+            await store.save(newer)
+            let loaded = await store.load()
+            #expect(loaded == AppConfiguration())
+            await store.flush()
+            #expect(try readConfiguration(at: file) == newer)
         }
     }
 
