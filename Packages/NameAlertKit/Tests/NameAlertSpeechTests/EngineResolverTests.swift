@@ -26,6 +26,17 @@ private let capsD = EngineCapabilities(
     osMajorVersion: 14, speechTranscriberAvailable: false, speechTranscriberLocales: [],
     dictationTranscriberLocales: [], sfSpeechOnDeviceLocales: [], isAppleSilicon: false)
 
+/// macOS 15 with the on-device English that `SFSpeechRecognizer` lists on a Mac set to US English.
+private let capsE = EngineCapabilities(
+    osMajorVersion: 15, speechTranscriberAvailable: false, speechTranscriberLocales: [],
+    dictationTranscriberLocales: [], sfSpeechOnDeviceLocales: ["en-ID", "en-PH", "en-SA", "en-US"],
+    isAppleSilicon: true)
+
+/// macOS 26 with the two kinds of Portuguese.
+private let capsF = EngineCapabilities(
+    osMajorVersion: 26, speechTranscriberAvailable: true, speechTranscriberLocales: ["pt-PT", "pt-BR"],
+    dictationTranscriberLocales: [], sfSpeechOnDeviceLocales: [], isAppleSilicon: true)
+
 private extension EngineResolution {
     /// The reason, when no engine was picked.
     var unavailableReason: String? {
@@ -66,12 +77,12 @@ struct EngineResolverTests {
         var testDescription: String { "\(capsName) \(preference) \(locale) \(size)" }
     }
 
-    /// The brief's table: the capabilities (A to D above), preference, language and size in, the engine out.
+    /// The brief's table: the capabilities (A to F above), preference, language and size in, the engine out.
     static let decisionTable: [Row] = [
         Row(capsName: "A", capabilities: capsA, preference: .automatic, locale: "en-US", size: .light,
             expected: .engine(.appleSpeechTranscriber, "en-US")),
         Row(capsName: "A", capabilities: capsA, preference: .automatic, locale: "en-IN", size: .light,
-            expected: .engine(.appleSpeechTranscriber, "en-GB")),
+            expected: .engine(.appleSpeechTranscriber, "en-US")),
         Row(capsName: "A", capabilities: capsA, preference: .automatic, locale: "fr-FR", size: .light,
             expected: .engine(.appleDictationTranscriber, "fr-FR")),
         Row(capsName: "A", capabilities: capsA, preference: .automatic, locale: "ta-IN", size: .balanced,
@@ -90,6 +101,10 @@ struct EngineResolverTests {
             expected: .engine(.whisperLight, "en-US")),
         Row(capsName: "D", capabilities: capsD, preference: .apple, locale: "en-US", size: .light,
             expected: .unavailable),
+        Row(capsName: "E", capabilities: capsE, preference: .automatic, locale: "en-IN", size: .light,
+            expected: .engine(.appleSFSpeech, "en-US")),
+        Row(capsName: "F", capabilities: capsF, preference: .automatic, locale: "pt-AO", size: .light,
+            expected: .engine(.appleSpeechTranscriber, "pt-BR")),
     ]
 
     @Test("Picks the engine in the decision table", arguments: EngineResolverTests.decisionTable)
@@ -169,9 +184,22 @@ struct EngineResolverTests {
         #expect(EngineResolver.matchLocale("EN-gb", in: ["en-US", "en-GB"]) == "en-GB")
     }
 
-    @Test func sameLanguageFallsBackToTheAlphabeticallyFirst() {
-        #expect(EngineResolver.matchLocale("en-IN", in: ["en-US", "en-GB", "fr-FR"]) == "en-GB")
-        #expect(EngineResolver.matchLocale("en", in: ["fr-FR", "en-US", "en-GB"]) == "en-GB")
+    @Test func sameLanguagePrefersTheRegionWhereItIsMostSpoken() {
+        // English is most spoken in the US, Portuguese in Brazil, Chinese in China (Foundation's likely subtags).
+        #expect(EngineResolver.matchLocale("en-IN", in: ["en-US", "en-GB", "fr-FR"]) == "en-US")
+        #expect(EngineResolver.matchLocale("en", in: ["fr-FR", "en-US", "en-GB"]) == "en-US")
+        #expect(EngineResolver.matchLocale("en-IN", in: ["en-ID", "en-PH", "en-SA", "en-US"]) == "en-US")
+        #expect(EngineResolver.matchLocale("pt-AO", in: ["pt-PT", "pt-BR"]) == "pt-BR")
+        #expect(EngineResolver.matchLocale("zh-SG", in: ["zh-TW", "zh-CN", "zh-HK"]) == "zh-CN")
+        // The region that counts is the language's, not a region override's.
+        #expect(EngineResolver.matchLocale("en_IN", in: ["en-GB", "en_US@rg=inzzzz"]) == "en_US@rg=inzzzz")
+    }
+
+    @Test func withoutThatRegionTheAlphabeticallyFirst() {
+        #expect(EngineResolver.matchLocale("en-IN", in: ["en-GB", "en-AU"]) == "en-AU")
+        #expect(EngineResolver.matchLocale("de-LU", in: ["de-CH", "de-AT"]) == "de-AT")
+        // "mul" has no region at all.
+        #expect(EngineResolver.matchLocale("mul", in: ["mul-IN", "mul-AB"]) == "mul-AB")
     }
 
     @Test func theLanguageCodeMustMatchWholly() {
@@ -184,7 +212,7 @@ struct EngineResolverTests {
         let supported = ["en-AU", "en-US"]
         #expect(EngineResolver.matchLocale("en_US@rg=inzzzz", in: supported) == "en-US")
         #expect(EngineResolver.matchLocale("en-US-u-rg-inzzzz", in: supported) == "en-US")
-        #expect(EngineResolver.matchLocale("en@calendar=gregorian", in: supported) == "en-AU")
+        #expect(EngineResolver.matchLocale("en@calendar=gregorian", in: supported) == "en-US")
     }
 
     @Test func nothingMatchesNothing() {

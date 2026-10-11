@@ -44,10 +44,12 @@ public enum EngineResolver {
 
     /// The supported identifier that serves `identifier`, spelled as the `supported` list has it.
     ///
-    /// `_` and `-` are the same, and case does not matter. An exact match wins. Otherwise the first of the
-    /// supported identifiers with the same language, in alphabetical order, so "en-IN" finds "en-GB" when there is no
-    /// Indian English. Settings that a language does not need, like the "@rg=inzzzz" in the identifier of a Mac with
-    /// a region override, are left out. Returns nil when no supported identifier has the language.
+    /// `_` and `-` are the same, and case does not matter. An exact match wins. Otherwise one of the supported
+    /// identifiers with the same language: the one for the region where the language is most spoken (Foundation's
+    /// likely subtags: English → US, Portuguese → Brazil), so "en-IN" finds "en-US" and not "en-ID" when there is no
+    /// Indian English; without that region, the first in alphabetical order. Settings that a language does not need,
+    /// like the "@rg=inzzzz" in the identifier of a Mac with a region override, are left out. Returns nil when no
+    /// supported identifier has the language.
     public static func matchLocale(_ identifier: String, in supported: [String]) -> String? {
         let wanted = canonical(identifier)
         guard let language = languageCode(of: wanted) else { return nil }
@@ -55,10 +57,16 @@ public enum EngineResolver {
         if let exact = candidates.first(where: { $0.canonical == wanted }) {
             return exact.identifier
         }
-        return candidates
+        let sameLanguage =
+            candidates
             .filter { languageCode(of: $0.canonical) == language }
-            .min { ($0.canonical, $0.identifier) < ($1.canonical, $1.identifier) }?
-            .identifier
+            .sorted { ($0.canonical, $0.identifier) < ($1.canonical, $1.identifier) }
+        if let likely = likelyRegion(ofLanguage: language),
+            let inLikelyRegion = sameLanguage.first(where: { region(of: $0.identifier) == likely })
+        {
+            return inLikelyRegion.identifier
+        }
+        return sameLanguage.first?.identifier
     }
 
     // MARK: Steps
@@ -116,5 +124,18 @@ public enum EngineResolver {
     /// The language part of a `canonical` identifier, or nil when it is empty.
     private static func languageCode(of canonical: String) -> String? {
         canonical.split(separator: "-").first.map(String.init)
+    }
+
+    /// The region where `language` is most spoken, from Foundation's likely subtags ("en" → "en-Latn-US" → "US"), or
+    /// nil when there is none.
+    private static func likelyRegion(ofLanguage language: String) -> String? {
+        let maximal = Locale.Language(identifier: language).maximalIdentifier
+        return Locale.Language(identifier: maximal).region?.identifier.uppercased()
+    }
+
+    /// The region of a supported identifier ("en-US" → "US"). It is the language's region: a region override
+    /// ("@rg=inzzzz") does not change it.
+    private static func region(of identifier: String) -> String? {
+        Locale.Language(identifier: identifier).region?.identifier.uppercased()
     }
 }
