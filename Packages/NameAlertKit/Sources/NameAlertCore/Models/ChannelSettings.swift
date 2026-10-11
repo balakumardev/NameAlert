@@ -9,8 +9,13 @@ public enum SystemSounds {
 }
 
 public struct SoundSettings: Codable, Sendable, Equatable {
+    static let volumeRange: ClosedRange<Double> = 0...1
+
     public var soundName = "Glass"
-    public var volume = 0.8
+    /// From 0 (silent) to 1 (full volume). Always within that range.
+    public var volume = 0.8 {
+        didSet { volume = volume.clamped(to: Self.volumeRange) }
+    }
 
     public init() {}
 
@@ -19,6 +24,7 @@ public struct SoundSettings: Codable, Sendable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         container.decodeTolerantly(into: &soundName, forKey: .soundName)
         container.decodeTolerantly(into: &volume, forKey: .volume)
+        volume = volume.clamped(to: Self.volumeRange)  // decoding bypasses didSet too
     }
 }
 
@@ -38,6 +44,8 @@ public struct PersistentAlarmSettings: Codable, Sendable, Equatable {
     public static let autoStopChoices = [30, 60, 120, 300]
 
     public var soundName = "Sosumi"
+    /// Seconds before the alarm stops by itself. A file can hold any number; reading it gives the closest of
+    /// `autoStopChoices`, so the setting always shows as one of the choices.
     public var autoStopSeconds = 120
 
     public init() {}
@@ -47,6 +55,18 @@ public struct PersistentAlarmSettings: Codable, Sendable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         container.decodeTolerantly(into: &soundName, forKey: .soundName)
         container.decodeTolerantly(into: &autoStopSeconds, forKey: .autoStopSeconds)
+        autoStopSeconds = Self.nearestAutoStopChoice(to: autoStopSeconds)
+    }
+
+    /// The choice closest to `seconds`: the longer one when two are equally close, so that an alarm is not cut short.
+    static func nearestAutoStopChoice(to seconds: Int) -> Int {
+        guard let shortest = autoStopChoices.min(), let longest = autoStopChoices.max() else { return seconds }
+        // Limited first, so that the distances below cannot overflow for a huge number.
+        let limited = Swift.min(Swift.max(seconds, shortest), longest)
+        return autoStopChoices.min { a, b in
+            let (distanceA, distanceB) = (abs(a - limited), abs(b - limited))
+            return distanceA != distanceB ? distanceA < distanceB : a > b
+        } ?? limited
     }
 }
 

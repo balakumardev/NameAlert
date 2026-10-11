@@ -81,8 +81,9 @@ struct ConfigStoreTests {
         // Fields that decode tolerantly are the model's business. The store only sets aside what cannot be used.
         let cases: [(json: String, ruleNames: [String])] = [
             ("{}", []),
+            (#"{"rules":[]}"#, []),
             (#"{"schemaVersion":1,"rules":[{"name":"keep","terms":["k"]}]}"#, ["keep"]),
-            (#"{"listening":{"source":"radio"},"rules":[{"name":"keep","terms":["k"]},42]}"#, ["keep"]),
+            (#"{"listening":{"source":"radio"},"rules":[{"name":"keep","terms":["k"]}]}"#, ["keep"]),
         ]
         for (json, ruleNames) in cases {
             try await inTemporaryDirectory { directory in
@@ -146,7 +147,7 @@ struct ConfigStoreTests {
     }
 
     @Test(.enabled(if: getuid() != 0, "root can read any file"))
-    func unreadableFileLoadsDefaultsAndIsLeftAlone() async throws {
+    func unreadableFileIsMovedAside() async throws {
         try await inTemporaryDirectory { directory in
             let file = directory.appendingPathComponent("config.json")
             let original = Data(#"{"rules":[{"name":"keep","terms":["k"]}]}"#.utf8)
@@ -156,15 +157,122 @@ struct ConfigStoreTests {
             // Some file systems ignore permission bits. Then there is nothing to test.
             guard !FileManager.default.isReadableFile(atPath: file.path) else { return }
 
-            // The OS refuses the read, and the copy for the backup fails for the same reason. Nothing crashes, the
-            // defaults load, and the file stays exactly as it was.
-            let loaded = await ConfigStore(fileURL: file).load()
+            // The OS refuses the read, and so the copy for the backup. A file can still be renamed, which keeps the
+            // user's bytes: the file is moved aside, the defaults load, and the store is free to write a new config.
+            let store = ConfigStore(fileURL: file, debounce: .milliseconds(10))
+            let loaded = await store.load()
             #expect(loaded == AppConfiguration())
+            #expect(!exists(file))
             let found = try backups(in: directory)
-            #expect(found.isEmpty)
+            #expect(found.count == 1)
+            let backup = try #require(found.first)
+            try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: backup.path)
+            #expect(try Data(contentsOf: backup) == original)
+            let suspended = await store.writesAreSuspended
+            #expect(!suspended)
 
-            try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path)
+            let config = makeConfiguration(ruleNamed: "x")
+            await store.save(config)
+            await store.flush()
+            #expect(try readConfiguration(at: file) == config)
+            #expect(try Data(contentsOf: backup) == original)  // and the moved file is not touched by it
+        }
+    }
+
+    @Test(.enabled(if: getuid() != 0, "root ignores folder permissions"))
+    func failedBackupSuspendsWrites() async throws {
+        try await inTemporaryDirectory { directory in
+            let file = directory.appendingPathComponent("config.json")
+            let original = Data("{not json".utf8)
+            try original.write(to: file)
+            // A folder nothing can be added to: the copy has no room, and the file cannot be renamed inside it.
+            try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
+            defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path) }
+            guard !FileManager.default.isWritableFile(atPath: directory.path) else { return }
+
+            let store = ConfigStore(fileURL: file, debounce: .milliseconds(10))
+            let loaded = await store.load()
+            #expect(loaded == AppConfiguration())
+            let suspended = await store.writesAreSuspended
+            #expect(suspended)
+
+            // The folder can be written again by now, so only the store's own choice keeps the file as it is: nobody
+            // has a copy of it, and a write would replace it.
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path)
+            await store.save(makeConfiguration(ruleNamed: "x"))
+            try await Task.sleep(for: .milliseconds(150))  // far longer than the debounce
+            await store.flush()
             #expect(try Data(contentsOf: file) == original)
+            #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path) == ["config.json"])
+        }
+    }
+
+    @Test func goodFilesDoNotSuspendWrites() async throws {
+        try await inTemporaryDirectory { directory in
+            let file = directory.appendingPathComponent("config.json")
+            for original in [nil, Data("{not json".utf8), Data(#"{"rules":"oops"}"#.utf8)] {
+                if let original { try original.write(to: file) } else { try? FileManager.default.removeItem(at: file) }
+                let store = ConfigStore(fileURL: file, debounce: .milliseconds(10))
+                _ = await store.load()
+                let suspended = await store.writesAreSuspended
+                #expect(!suspended, "\(original.map { String(decoding: $0, as: UTF8.self) } ?? "no file")")
+                let config = makeConfiguration(ruleNamed: "x")
+                await store.save(config)
+                await store.flush()
+                #expect(try readConfiguration(at: file) == config)
+            }
+        }
+    }
+
+    @Test(arguments: [
+        #"{"rules":"oops","listening":{"source":"microphone"}}"#,
+        #"{"rules":{"name":"a","terms":["x"]},"listening":{"source":"microphone"}}"#,
+        #"{"rules":null,"listening":{"source":"microphone"}}"#,
+        #"{"rules":7,"listening":{"source":"microphone"}}"#,
+    ])
+    func rulesNotArrayIsBackedUp(json: String) async throws {
+        try await inTemporaryDirectory { directory in
+            let file = directory.appendingPathComponent("config.json")
+            let original = Data(json.utf8)
+            try original.write(to: file)
+
+            // The rest of the file loads, but the next save would leave out whatever `rules` held: it is kept first.
+            let loaded = await ConfigStore(fileURL: file).load()
+            #expect(loaded.listening.source == .microphone)
+            #expect(loaded.rules.isEmpty)
+            let found = try backups(in: directory)
+            #expect(found.count == 1, "\(json)")
+            let backup = try #require(found.first)
+            #expect(try Data(contentsOf: backup) == original)
+            #expect(try Data(contentsOf: file) == original)  // a copy: loading does not touch config.json
+        }
+    }
+
+    @Test(arguments: [#"{"name":"broken"}"#, #"{"terms":["y"]}"#, "42", "null", "[]", #""rule""#, "{}"])
+    func droppedRuleElementIsBackedUp(broken: String) async throws {
+        try await inTemporaryDirectory { directory in
+            let file = directory.appendingPathComponent("config.json")
+            let original = Data(#"{"rules":[{"name":"keep","terms":["k"]},\#(broken)]}"#.utf8)
+            try original.write(to: file)
+
+            // The rule that can be read is used, but the next save would drop the other one: the file is kept first.
+            let loaded = await ConfigStore(fileURL: file).load()
+            #expect(loaded.rules.map(\.name) == ["keep"])
+            let found = try backups(in: directory)
+            #expect(found.count == 1, "\(broken)")
+            let backup = try #require(found.first)
+            #expect(try Data(contentsOf: backup) == original)
+            #expect(try Data(contentsOf: file) == original)
+        }
+    }
+
+    @Test func aFileWhoseEveryRuleIsReadableIsNotBackedUpAndKeepsItsOrder() async throws {
+        try await inTemporaryDirectory { directory in
+            let file = directory.appendingPathComponent("config.json")
+            try Data(#"{"rules":[{"name":"b","terms":["b"]},{"name":"a","terms":["a"]}]}"#.utf8).write(to: file)
+            let loaded = await ConfigStore(fileURL: file).load()
+            #expect(loaded.rules.map(\.name) == ["b", "a"])
+            #expect(try backups(in: directory).isEmpty)
         }
     }
 
@@ -307,9 +415,10 @@ struct ConfigStoreTests {
             await store.save(last)
 
             // Nobody flushes: the timer started by the first save writes the file by itself, with the latest value.
-            let written = await waitUntil { exists(file) }
+            // Polled for that value, not for the file: on a busy machine the test may be slow to make its second
+            // save, and the first timer may then write `first` on the way.
+            let written = await waitUntil { (try? readConfiguration(at: file)) == last }
             #expect(written)
-            #expect(try readConfiguration(at: file) == last)
 
             // The burst produced a single write: once the file is removed, nothing brings it back.
             try FileManager.default.removeItem(at: file)
@@ -319,9 +428,8 @@ struct ConfigStoreTests {
             // And the timer slot was released, so a later save is written too.
             let later = makeConfiguration(ruleNamed: "later")
             await store.save(later)
-            let writtenAgain = await waitUntil { exists(file) }
+            let writtenAgain = await waitUntil { (try? readConfiguration(at: file)) == later }
             #expect(writtenAgain)
-            #expect(try readConfiguration(at: file) == later)
         }
     }
 

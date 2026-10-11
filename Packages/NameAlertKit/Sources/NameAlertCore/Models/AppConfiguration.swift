@@ -68,7 +68,8 @@ public struct GeneralSettings: Codable, Sendable, Equatable {
 /// newer app.
 public struct AppConfiguration: Codable, Sendable, Equatable {
     public static let currentSchemaVersion = 1
-    static let globalCooldownRange: ClosedRange<Double> = 0...30
+    /// The least and most seconds `globalCooldownSeconds` can be.
+    public static let globalCooldownRange: ClosedRange<Double> = 0...30
 
     public var schemaVersion = AppConfiguration.currentSchemaVersion
     public var hasCompletedOnboarding = false

@@ -245,6 +245,58 @@ struct ConfigurationCodingTests {
         #expect((0.0...30.0).contains(global.globalCooldownSeconds))
     }
 
+    @Test func globalCooldownRangeIsPublic() {
+        // This file does not use @testable, so it compiles only while the range is visible to other modules.
+        #expect(AppConfiguration.globalCooldownRange == 0...30)
+    }
+
+    @Test func volumeIsClampedOnDecodeAndAssignment() throws {
+        func volume(inFile json: String) throws -> Double {
+            try decode(#"{"channels":{"sound":{"volume":\#(json)}}}"#).channels.sound.volume
+        }
+        #expect(try volume(inFile: "1.7") == 1)
+        #expect(try volume(inFile: "100") == 1)
+        #expect(try volume(inFile: "-0.2") == 0)
+        #expect(try volume(inFile: "0") == 0)
+        #expect(try volume(inFile: "1") == 1)
+        #expect(try volume(inFile: "0.3") == 0.3)
+
+        var settings = SoundSettings()
+        settings.volume = 5
+        #expect(settings.volume == 1)
+        settings.volume = -1
+        #expect(settings.volume == 0)
+        settings.volume = 0.55
+        #expect(settings.volume == 0.55)
+        settings.volume = .nan
+        #expect((0.0...1.0).contains(settings.volume))
+
+        // Whatever was clamped on the way in is what is written out.
+        var config = AppConfiguration()
+        config.channels.sound.volume = 9
+        let decoded = try JSONDecoder().decode(AppConfiguration.self, from: JSONEncoder().encode(config))
+        #expect(decoded.channels.sound.volume == 1)
+    }
+
+    @Test(arguments: [
+        (30, 30), (60, 60), (120, 120), (300, 300),  // the choices themselves
+        (31, 30), (44, 30), (59, 60), (89, 60), (91, 120), (209, 120), (211, 300),  // the closest one
+        (45, 60), (90, 120), (210, 300),  // halfway between two: the longer, so an alarm is not cut short
+        (0, 30), (-5, 30), (1_000, 300), (Int.min, 30), (Int.max, 300),  // out of range
+    ])
+    func autoStopSecondsSnapToAChoice(seconds: Int, expected: Int) throws {
+        let config = try decode(#"{"channels":{"persistentAlarm":{"autoStopSeconds":\#(seconds)}}}"#)
+        #expect(config.channels.persistentAlarm.autoStopSeconds == expected, "\(seconds)")
+        #expect(PersistentAlarmSettings.autoStopChoices.contains(config.channels.persistentAlarm.autoStopSeconds))
+    }
+
+    @Test func autoStopSecondsThatIsNotAWholeNumberKeepsTheDefault() throws {
+        for value in ["45.5", #""soon""#, "null"] {
+            let config = try decode(#"{"channels":{"persistentAlarm":{"autoStopSeconds":\#(value)}}}"#)
+            #expect(config.channels.persistentAlarm.autoStopSeconds == 120, "\(value)")
+        }
+    }
+
     // MARK: Channel settings
 
     @Test func isConfiguredRules() {
