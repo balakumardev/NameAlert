@@ -97,6 +97,26 @@ private func queryItems(of request: URLRequest) -> [String: String] {
     return Dictionary(uniqueKeysWithValues: (components?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
 }
 
+/// What the body of an ntfy request says, read back the way ntfy reads it.
+private struct NtfyMessage: Decodable {
+    let topic: String
+    let title: String
+    let message: String
+    let priority: Int
+    let tags: [String]
+}
+
+private func ntfyMessage(of sent: StubServer.Received) throws -> NtfyMessage {
+    try JSONDecoder().decode(NtfyMessage.self, from: sent.body)
+}
+
+/// The keys of the JSON object that is the body, to see that nothing else is in it.
+private func ntfyKeys(of sent: StubServer.Received) throws -> Set<String> {
+    let json = try JSONSerialization.jsonObject(with: sent.body)
+    let object = try #require(json as? [String: Any])
+    return Set(object.keys)
+}
+
 private let expectedBody =
     #"{"app":{"build":"123","version":"1.0.0"},"context":"…can Bala share the deck…","engine":"appleSpeechTranscriber","event":"keyword.detected","id":"00000000-0000-0000-0000-000000000001","matchedText":"Bala","rule":{"id":"00000000-0000-0000-0000-0000000000AA","name":"My name"},"source":"systemAudio","term":"Bala","timestamp":"2025-10-11T09:30:00Z","version":1}"#
 
@@ -435,10 +455,16 @@ struct NetworkChannelsTests {
         try await NtfyChannel(client: client(server)).deliver(sampleHit(), settings: ntfySettings(), secrets: secrets)
 
         let sent = try #require(server.onlyRequest)
-        #expect(sent.request.url?.absoluteString == "https://ntfy.example/team")
-        #expect(sent.header("Title") == "Heard “Bala”")
-        #expect(sent.header("Priority") == "high")
+        #expect(sent.request.httpMethod == "POST")
+        #expect(sent.request.url?.absoluteString == "https://ntfy.example/")  // the server's root: the topic is in the body
+        #expect(sent.header("Content-Type") == "application/json")
         #expect(sent.header("Authorization") == "Bearer tk_secret")
+        let message = try ntfyMessage(of: sent)
+        #expect(message.topic == "team")
+        #expect(message.title == "Heard “Bala”")
+        #expect(message.message == "…can Bala share the deck…")
+        #expect(message.priority == 4)  // high
+        #expect(message.tags == ["ear"])
     }
 
     @Test func ntfyRequestShape() async throws {
@@ -447,49 +473,97 @@ struct NetworkChannelsTests {
         try await NtfyChannel(client: client(server)).deliver(sampleHit(), settings: ntfySettings(), secrets: noSecrets)
 
         let sent = try #require(server.onlyRequest)
-        #expect(sent.request.httpMethod == "POST")
-        #expect(sent.bodyText == "…can Bala share the deck…")
-        #expect(sent.header("Content-Type") == "text/plain; charset=utf-8")
-        #expect(sent.header("Tags") == "ear")
         #expect(sent.header("Authorization") == nil)  // no token, no Authorization
         #expect(sent.request.timeoutInterval == 5)
+        // The body says it all and no header does: a header cannot hold the curly quotes of the title.
+        for name in ["Title", "X-Title", "Priority", "Tags"] {
+            #expect(sent.header(name) == nil, "\(name) header")
+        }
+        let keys = try ntfyKeys(of: sent)
+        #expect(keys == ["topic", "title", "message", "priority", "tags"])
     }
 
-    /// URLSession cuts a header value at a curly quote (HTTP/1.1) or drops the header (HTTP/2), and the title has
-    /// curly quotes. ntfy reads `X-Title` before `Title` and decodes RFC 2047 words.
-    @Test func ntfyTitleAlsoTravelsAsAnEncodedWord() async throws {
+    /// The title has curly quotes, and a name can have any letters. In a header URLSession would cut the value at the
+    /// first curly quote (HTTP/1.1) or leave the header out (HTTP/2); in JSON they go as they are, in UTF-8.
+    @Test func ntfyTitleAndMessageKeepNonASCIIText() async throws {
         let server = StubServer()
+        let hit = sampleHit(term: "José", context: "…¿puede José compartir la presentación?…")
 
-        try await NtfyChannel(client: client(server)).deliver(sampleHit(), settings: ntfySettings(), secrets: noSecrets)
+        try await NtfyChannel(client: client(server)).deliver(hit, settings: ntfySettings(), secrets: noSecrets)
 
         let sent = try #require(server.onlyRequest)
-        #expect(sent.header("X-Title") == "=?UTF-8?B?SGVhcmQg4oCcQmFsYeKAnQ==?=")  // Heard “Bala”
+        let message = try ntfyMessage(of: sent)
+        #expect(message.title == "Heard “José”")
+        #expect(message.message == "…¿puede José compartir la presentación?…")
+        #expect(sent.bodyText.contains("Heard “José”"))  // UTF-8 as it is, not \u escapes
+    }
+
+    @Test func ntfyTitleHoldsAnyTermIntact() async throws {
+        let term = "Bālakumar 🙂 “quoted” \"straight\" back\\slash a/b tab\there " + String(repeating: "very long name ", count: 12)
+        let server = StubServer()
+
+        try await NtfyChannel(client: client(server)).deliver(
+            sampleHit(term: term), settings: ntfySettings(), secrets: noSecrets)
+
+        let sent = try #require(server.onlyRequest)
+        let message = try ntfyMessage(of: sent)
+        #expect(message.title == "Heard “\(term)”")
     }
 
     @Test func ntfyPriorityFollowsTheSetting() async throws {
+        let levels: [NtfyPriority: Int] = [.default: 3, .high: 4, .urgent: 5]
+        #expect(Set(levels.keys) == Set(NtfyPriority.allCases))  // a new priority needs its level here
+
         for priority in NtfyPriority.allCases {
             let server = StubServer()
             try await NtfyChannel(client: client(server)).deliver(
                 sampleHit(), settings: ntfySettings(priority: priority), secrets: noSecrets)
-            #expect(server.onlyRequest?.header("Priority") == priority.rawValue)
+            let sent = try #require(server.onlyRequest)
+            let message = try ntfyMessage(of: sent)
+            #expect(message.priority == levels[priority], "\(priority)")
         }
     }
 
-    @Test func ntfyJoinsServerAndTopicWithOneSlash() async throws {
-        let rows: [(server: String, topic: String, expected: String)] = [
-            ("https://ntfy.example", "team", "https://ntfy.example/team"),
-            ("https://ntfy.example/", "team", "https://ntfy.example/team"),
-            ("https://ntfy.example/base", "team", "https://ntfy.example/base/team"),
-            ("https://ntfy.example/base//", "team", "https://ntfy.example/base/team"),
-            ("  https://ntfy.example:8443/ \n", " team\t", "https://ntfy.example:8443/team"),
-            ("https://ntfy.example/", "/team", "https://ntfy.example/team"),
-            ("http://192.168.1.5:8080", "my topic", "http://192.168.1.5:8080/my%20topic"),
+    @Test func ntfyPostsToTheServerRootAndPutsTheTopicInTheBody() async throws {
+        let rows: [(server: String, topic: String, url: String, sentTopic: String)] = [
+            ("https://ntfy.example", "team", "https://ntfy.example/", "team"),
+            ("https://ntfy.example/", "team", "https://ntfy.example/", "team"),
+            ("https://ntfy.example/base", "team", "https://ntfy.example/base/", "team"),
+            ("https://ntfy.example/base//", "team", "https://ntfy.example/base/", "team"),
+            ("  https://ntfy.example:8443/ \n", " team\t", "https://ntfy.example:8443/", "team"),
+            // The server is where to publish and has no say in what is published, so its query and fragment go.
+            ("https://ntfy.example/base?token=1#frag", "team", "https://ntfy.example/base/", "team"),
+            ("http://192.168.1.5:8080", "my-topic", "http://192.168.1.5:8080/", "my-topic"),
         ]
         for row in rows {
             let server = StubServer()
             try await NtfyChannel(client: client(server)).deliver(
                 sampleHit(), settings: ntfySettings(server: row.server, topic: row.topic), secrets: noSecrets)
-            #expect(server.onlyRequest?.request.url?.absoluteString == row.expected, "for \(row.server) + \(row.topic)")
+            let sent = try #require(server.onlyRequest)
+            #expect(sent.request.url?.absoluteString == row.url, "for \(row.server)")
+            let message = try ntfyMessage(of: sent)
+            #expect(message.topic == row.sentTopic, "for \(row.topic.debugDescription)")
+        }
+    }
+
+    @Test func ntfyMessageIsTheContextOrElseTheExcerpt() async throws {
+        let rows: [(context: String, excerpt: String?, message: String)] = [
+            ("…can Bala share the deck…", nil, "…can Bala share the deck…"),
+            ("…can Bala share the deck…", sampleExcerpt, "…can Bala share the deck…"),  // the context comes first
+            ("", sampleExcerpt, sampleExcerpt),
+            (" \n", sampleExcerpt, sampleExcerpt),
+            ("", nil, ""),
+            ("", "  ", ""),
+        ]
+        for row in rows {
+            let server = StubServer()
+            let hit = sampleHit(context: row.context, excerpt: row.excerpt)
+
+            try await NtfyChannel(client: client(server)).deliver(hit, settings: ntfySettings(), secrets: noSecrets)
+
+            let sent = try #require(server.onlyRequest)
+            let message = try ntfyMessage(of: sent)
+            #expect(message.message == row.message, "for \(row.context.debugDescription) + \(row.excerpt.debugDescription)")
         }
     }
 
@@ -523,26 +597,6 @@ struct NetworkChannelsTests {
             }
         }
         #expect(server.requestCount == 0)
-    }
-
-    @Test func ntfyTitleHoldsAnyTermIntact() async throws {
-        let term = "Bālakumar 🙂 " + String(repeating: "very long name ", count: 12)
-        let server = StubServer()
-
-        try await NtfyChannel(client: client(server)).deliver(
-            sampleHit(term: term), settings: ntfySettings(), secrets: noSecrets)
-
-        let sent = try #require(server.onlyRequest)
-        let encoded = try #require(sent.header("X-Title"))
-        #expect(encoded.allSatisfy { $0.isASCII })
-        // Every encoded word is short enough for a header line, and together they read back as the title.
-        let words = encoded.split(separator: " ")
-        #expect(words.allSatisfy { $0.count <= 75 && $0.hasPrefix("=?UTF-8?B?") && $0.hasSuffix("?=") })
-        let decoded = words.map { word -> String in
-            let base64 = word.dropFirst("=?UTF-8?B?".count).dropLast(2)
-            return String(decoding: Data(base64Encoded: String(base64)) ?? Data(), as: UTF8.self)
-        }.joined()
-        #expect(decoded == "Heard “\(term)”")
     }
 
     // MARK: Telegram call channel
