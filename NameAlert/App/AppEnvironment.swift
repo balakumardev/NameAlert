@@ -41,6 +41,7 @@ final class AppEnvironment {
             return
         }
         Task {
+            await AppRelaunch.waitForPreviousCopyToQuit()
             await controller.bootstrap()
             if !controller.configuration.hasCompletedOnboarding {
                 router.open(.onboarding)

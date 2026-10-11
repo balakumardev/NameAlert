@@ -1,27 +1,53 @@
-import AppKit
 import NameAlertRuntime
 import SwiftUI
 
-/// The window that opens from the menu bar icon. Placeholder until the popover lands (Task 6.2).
+/// The window that opens from the menu bar icon, 340 pt wide: what NameAlert is doing, the last words heard, the
+/// recent mentions, and the everyday actions. It draws no background of its own: the menu bar window's material
+/// shows through.
+///
+/// Layout: text starts 16 pt from the edges; row highlights and notes start 8 pt from them.
 struct MenuBarPopover: View {
+    static let width: CGFloat = 340
+
     @Environment(ListeningController.self) private var controller
-    @Environment(WindowRouter.self) private var router
+
+    private let isAddingKeyword: Bool
+
+    /// `isAddingKeyword` opens the new keyword field from the start, for renders.
+    init(isAddingKeyword: Bool = false) {
+        self.isAddingKeyword = isAddingKeyword
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(AppInfo.displayName)
-                .font(.headline)
-            HStack {
-                Button("Settings…") { router.open(.settings) }
-                    .keyboardShortcut(",", modifiers: .command)
-                    .accessibilityLabel("Open Settings")
-                Spacer()
-                Button("Quit \(AppInfo.displayName)") { NSApp.terminate(nil) }
-                    .keyboardShortcut("q")
-                    .accessibilityLabel("Quit \(AppInfo.displayName)")
+        let isListening = if case .listening = controller.state { true } else { false }
+        let hasNotices = PopoverNotices.isShown(state: controller.state, warnings: controller.warnings)
+        VStack(alignment: .leading, spacing: 0) {
+            PopoverHeader()
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, isListening || hasNotices ? 8 : 12)
+            PopoverNotices()
+            if isListening {
+                LiveStrip()
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 8)
             }
+            SectionDivider()
+            RecentHitsList()
+                .padding(8)
+            SectionDivider()
+            PopoverActions(isAddingKeyword: isAddingKeyword)
+            SectionDivider()
+            PopoverFooter()
         }
-        .padding(16)
-        .frame(width: 340)
+        .frame(width: Self.width)
+    }
+}
+
+/// A separator between the popover's sections, inset like a menu's.
+private struct SectionDivider: View {
+    var body: some View {
+        Divider()
+            .padding(.horizontal, 12)
     }
 }
