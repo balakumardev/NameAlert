@@ -55,14 +55,8 @@ struct RuleEditorView: View {
 
     private func ruleSection(_ rule: Rule) -> some View {
         Section {
-            LabeledContent("Name") {
-                DraftTextField("Name", value: rule.name, prompt: "Rule name") { name in
-                    controller.edit(rule: ruleID) { $0.name = name }
-                }
-                .textFieldStyle(.roundedBorder)
-                .labelsHidden()
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity)
+            LabeledTextField(title: "Name", value: rule.name, prompt: "Rule name") { name in
+                controller.edit(rule: ruleID) { $0.name = name }
             }
 
             VStack(alignment: .leading, spacing: 8) {

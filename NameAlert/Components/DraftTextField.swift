@@ -34,16 +34,17 @@ struct DraftTextField: View {
 }
 
 /// A slider that moves with the pointer and reports every change; see `DraftTextField` for why it keeps its own value.
+/// With a `step` the slider moves in whole steps and shows tick marks; without one it moves smoothly.
 struct DraftSlider: View {
     private let title: String
     private let range: ClosedRange<Double>
-    private let step: Double
+    private let step: Double?
     private let onChange: (Double) -> Void
 
     @State private var draft: Double
 
     init(
-        _ title: String, value: Double, in range: ClosedRange<Double>, step: Double,
+        _ title: String, value: Double, in range: ClosedRange<Double>, step: Double? = nil,
         onChange: @escaping (Double) -> Void
     ) {
         self.title = title
@@ -54,9 +55,18 @@ struct DraftSlider: View {
     }
 
     var body: some View {
-        Slider(value: $draft, in: range, step: step) { Text(verbatim: title) }
+        slider
             .labelsHidden()
             .onChange(of: draft) { _, new in onChange(new) }
             .accessibilityLabel(title)
+    }
+
+    @ViewBuilder
+    private var slider: some View {
+        if let step {
+            Slider(value: $draft, in: range, step: step) { Text(verbatim: title) }
+        } else {
+            Slider(value: $draft, in: range) { Text(verbatim: title) }
+        }
     }
 }

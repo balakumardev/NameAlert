@@ -10,11 +10,14 @@ import SwiftUI
 struct SettingsView: View {
     static let minimumSize = CGSize(width: 760, height: 540)
 
+    /// Where the pane that was open last is remembered, so Settings opens where it was left.
+    static let lastSectionKey = "settings.lastSection"
+
     @State private var selection: SettingsSection
 
-    /// `section` is the pane that opens first.
-    init(section: SettingsSection = .general) {
-        _selection = State(initialValue: section)
+    /// `section` is the pane that opens first; without it, the one that was open last time, else General.
+    init(section: SettingsSection? = nil) {
+        _selection = State(initialValue: section ?? Self.lastSection())
     }
 
     var body: some View {
@@ -35,6 +38,14 @@ struct SettingsView: View {
         .toolbar(removing: .sidebarToggle)
         .environment(\.settingsNavigation, SettingsNavigation { selection = $0 })
         .frame(minWidth: Self.minimumSize.width, minHeight: Self.minimumSize.height)
+        .onChange(of: selection) { _, section in
+            UserDefaults.standard.set(section.rawValue, forKey: Self.lastSectionKey)
+        }
+    }
+
+    /// The pane that was open when Settings was last used.
+    static func lastSection(in defaults: UserDefaults = .standard) -> SettingsSection {
+        defaults.string(forKey: lastSectionKey).flatMap(SettingsSection.init(rawValue:)) ?? .general
     }
 
     /// The sidebar's selection: one pane is always chosen.
@@ -51,7 +62,11 @@ struct SettingsView: View {
             GeneralSettingsView()
         case .rules:
             RulesSettingsView()
-        case .alerts, .speech, .history, .shortcuts, .about:
+        case .alerts:
+            AlertsSettingsView()
+        case .speech:
+            SpeechSettingsView()
+        case .history, .shortcuts, .about:
             // These panes arrive with their own tasks.
             ContentUnavailableView(selection.title, systemImage: selection.systemImage)
         }

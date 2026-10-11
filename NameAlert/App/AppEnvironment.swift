@@ -5,14 +5,16 @@ import NameAlertRuntime
 import SwiftUI
 import UserNotifications
 
-/// The composition root: the one listening controller and window router every scene shares, and the app-level
-/// commands (launch, `namealert://` links, notification actions).
+/// The composition root: the one listening controller, window router and secrets model every scene shares, and the
+/// app-level commands (launch, `namealert://` links, notification actions).
 @MainActor
 final class AppEnvironment {
     static let shared = AppEnvironment()
 
     let controller: ListeningController
     let router: WindowRouter
+    /// The Keychain secrets the Alerts settings edit. It reads nothing until a pane asks.
+    let secrets = SecretsModel()
 
     private let logger = Log.logger("app")
 
@@ -78,10 +80,11 @@ final class AppEnvironment {
 }
 
 extension View {
-    /// Gives a scene's root view the shared controller and window router.
+    /// Gives a scene's root view the shared controller, window router and secrets model.
     func appEnvironment(_ environment: AppEnvironment) -> some View {
         self
             .environment(environment.controller)
             .environment(environment.router)
+            .environment(environment.secrets)
     }
 }

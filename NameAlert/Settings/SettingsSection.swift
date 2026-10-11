@@ -78,12 +78,6 @@ struct SettingsCaption: View {
         self.isError = isError
     }
 
-    /// Text with Markdown links in it.
-    init(markdown: LocalizedStringKey) {
-        self.text = Text(markdown)
-        self.isError = false
-    }
-
     var body: some View {
         text
             .font(.callout)

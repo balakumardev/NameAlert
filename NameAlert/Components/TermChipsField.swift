@@ -81,6 +81,8 @@ private struct TermChip: View {
     let term: String
     let remove: () -> Void
 
+    @Environment(\.colorSchemeContrast) private var contrast
+
     var body: some View {
         HStack(spacing: 4) {
             Text(verbatim: term)
@@ -101,6 +103,11 @@ private struct TermChip: View {
         .padding(.trailing, 4)
         .padding(.vertical, 3)
         .background(Capsule().fill(.tint.opacity(0.16)))
+        .overlay {
+            if contrast == .increased {
+                Capsule().strokeBorder(.tint.opacity(0.7))
+            }
+        }
     }
 }
 
