@@ -26,11 +26,12 @@ NameAlert.xcodeproj
 
 # CI artifacts
 *.dmg
+dist/
 
-# Swift Package Manager
+# Swift Package Manager (the Packages/ sources are tracked; only build output is ignored)
 .swiftpm/
 .build/
-Packages/
+Packages/NameAlertKit/.build/
 Package.resolved
 
 # CocoaPods / Carthage (not used, but defensive)

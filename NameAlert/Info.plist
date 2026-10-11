@@ -8,6 +8,8 @@
 	<string>NameAlert</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -17,18 +19,35 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>dev.balakumar.namealert</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>namealert</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
-	<string>Copyright © 2026</string>
+	<string>Copyright © 2026 CoolSolve LLP</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>NameAlert listens to your microphone on-device to detect when your name is spoken.</string>
+	<string>NameAlert listens to your microphone on this Mac to notice when someone says your name.</string>
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>NameAlert listens to system audio (Zoom, Teams, etc.) on-device to detect when your name is spoken.</string>
+	<string>NameAlert listens to audio from calls and videos on this Mac to notice when someone says your name.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>NameAlert uses on-device speech recognition to detect keywords in audio.</string>
+	<string>NameAlert turns speech into text on this Mac so it can spot your name and keywords.</string>
 </dict>
 </plist>
