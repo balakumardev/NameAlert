@@ -82,11 +82,12 @@ public enum ModelCatalog {
         }
     }
 
-    /// About how much memory the engine needs at this size, in megabytes. The UI shows it next to the download size.
+    /// About how much memory the engine needs at this size, in megabytes, as measured with the real models. The UI
+    /// shows it next to the download size.
     public static func ramEstimateMB(_ size: LocalModelSize) -> Int {
         switch size {
-        case .light: 150
-        case .balanced: 250
+        case .light: 170
+        case .balanced: 260
         }
     }
 

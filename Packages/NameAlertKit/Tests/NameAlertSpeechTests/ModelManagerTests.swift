@@ -194,8 +194,8 @@ struct ModelManagerTests {
                 == "https://huggingface.co/ggml-org/whisper-vad/resolve/9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v5.1.2.bin"
         )
 
-        #expect(ModelCatalog.ramEstimateMB(.light) == 150)
-        #expect(ModelCatalog.ramEstimateMB(.balanced) == 250)
+        #expect(ModelCatalog.ramEstimateMB(.light) == 170)
+        #expect(ModelCatalog.ramEstimateMB(.balanced) == 260)
     }
 
     struct LocaleCase: Sendable, CustomTestStringConvertible {

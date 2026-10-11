@@ -150,13 +150,9 @@ struct SpeechSettingsView: View {
         }
     }
 
-    /// What the engine needs in memory, as measured with the real models. (`ModelCatalog.ramEstimateMB` still holds the
-    /// planning figures of 150 and 250.)
+    /// What the engine needs in memory, as measured with the real models.
     static func memoryEstimateMB(for size: LocalModelSize) -> Int {
-        switch size {
-        case .light: 170
-        case .balanced: 260
-        }
+        ModelCatalog.ramEstimateMB(size)
     }
 
     static func memoryText(for size: LocalModelSize) -> String {
