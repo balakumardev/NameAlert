@@ -1,0 +1,101 @@
+import AppKit
+import NameAlertAlerts
+import NameAlertCore
+import UserNotifications
+
+/// Launch, `namealert://` links, sleep and wake, quitting, and the hit notifications' buttons.
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    /// How long quitting waits for listening to stop and the settings and history to be written.
+    private static let quitTimeLimit: Duration = .seconds(4)
+
+    private var environment: AppEnvironment { .shared }
+    private let logger = Log.logger("app")
+    private var workspaceObservers: [any NSObjectProtocol] = []
+    private var isQuitting = false
+    private var hasAnsweredQuit = false
+
+    // MARK: - Launch
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard AppEnvironment.isLive else { return }
+        NotificationActions.register()
+        UNUserNotificationCenter.current().delegate = self
+        observeSleepAndWake()
+        environment.launch()
+    }
+
+    /// Permission problems are not retried on their own; they are checked again whenever the app comes forward.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        guard AppEnvironment.isLive else { return }
+        let controller = environment.controller
+        Task { await controller.refreshPermissions() }
+    }
+
+    // MARK: - Links
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            guard let route = URLRoute(url: url) else {
+                logger.info("Ignored a link that is not a NameAlert command: \(url.absoluteString, privacy: .private)")
+                continue
+            }
+            environment.perform(route)
+        }
+    }
+
+    // MARK: - Sleep, wake and quit
+
+    private func observeSleepAndWake() {
+        let center = NSWorkspace.shared.notificationCenter
+        let controller = environment.controller
+        workspaceObservers = [
+            center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { _ in
+                Task { @MainActor in await controller.systemWillSleep() }
+            },
+            center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
+                Task { @MainActor in await controller.systemDidWake() }
+            },
+        ]
+    }
+
+    /// Stops listening and writes the settings and history that are waiting before the app quits; gives up waiting
+    /// after `quitTimeLimit` so a stuck audio device cannot hold the app open.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard AppEnvironment.isLive else { return .terminateNow }
+        // Asked again (say, by logout) while the first request is still being answered: that answer quits the app.
+        guard !isQuitting else { return .terminateLater }
+        isQuitting = true
+        let controller = environment.controller
+        Task {
+            await controller.systemWillSleep()
+            answerQuit()
+        }
+        Task {
+            try? await Task.sleep(for: Self.quitTimeLimit)
+            answerQuit()
+        }
+        return .terminateLater
+    }
+
+    private func answerQuit() {
+        guard !hasAnsweredQuit else { return }
+        hasAnsweredQuit = true
+        NSApp.reply(toApplicationShouldTerminate: true)
+    }
+
+    // MARK: - Notifications
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter, willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .sound, .list]
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
+    ) async {
+        let action = response.actionIdentifier
+        await MainActor.run { AppEnvironment.shared.handleNotificationAction(action) }
+    }
+}

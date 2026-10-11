@@ -41,7 +41,9 @@ targets:
       properties:
         LSUIElement: true
         CFBundleName: NameAlert
-        CFBundleDisplayName: NameAlert
+        # The name people see; the app reads it through AppInfo.displayName, so renaming the app is this one value
+        # (the screenshot host below reuses it through the anchor).
+        CFBundleDisplayName: &displayName NameAlert
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleIconName: AppIcon
@@ -73,8 +75,59 @@ targets:
         INFOPLIST_FILE: NameAlert/Info.plist
         CODE_SIGN_ENTITLEMENTS: NameAlert/NameAlert.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         ENABLE_PREVIEWS: YES
         COMBINE_HIDPI_IMAGES: YES
+
+  # Hosts the render and screenshot tests: the app's views and logic without its @main, Info.plist or entitlements,
+  # so it never listens, is not sandboxed (renders are written into the repository) and claims no URL scheme.
+  ScreenshotHost:
+    type: application
+    platform: macOS
+    sources:
+      - path: NameAlert
+        excludes:
+          - "Info.plist"
+          - "NameAlert.entitlements"
+          - "App/NameAlertApp.swift"
+      - path: ScreenshotHost
+    dependencies:
+      - package: NameAlertKit
+        product: NameAlertKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.balakumar.namealert.screenshots-host
+        GENERATE_INFOPLIST_FILE: YES
+        # Explicitly none: XcodeGen would otherwise pick up NameAlert/Info.plist from the sources, and the host would
+        # claim the namealert:// scheme and take the app's links.
+        INFOPLIST_FILE: ""
+        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_CFBundleDisplayName: *displayName
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) SCREENSHOT_HOST"
+        # The test bundle links nothing itself: it resolves the app's and NameAlertKit's symbols in this executable
+        # (BUNDLE_LOADER), so keep them all here, in the executable, and loadable by an ad-hoc signed bundle.
+        DEAD_CODE_STRIPPING: NO
+        ENABLE_DEBUG_DYLIB: NO
+        ENABLE_PREVIEWS: NO
+        ENABLE_HARDENED_RUNTIME: NO
+        COMBINE_HIDPI_IMAGES: YES
+
+  # Renders every screen state to build/renders/*.png (git-ignored) for review, and later the App Store screenshots.
+  NameAlertScreenshots:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: NameAlertScreenshots
+    dependencies:
+      - target: ScreenshotHost
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.balakumar.namealert.screenshots
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/ScreenshotHost.app/Contents/MacOS/ScreenshotHost"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        ENABLE_HARDENED_RUNTIME: NO
 schemes:
   NameAlert:
     build:
@@ -86,3 +139,13 @@ schemes:
       config: Debug
     archive:
       config: Release
+  Screenshots:
+    build:
+      targets:
+        ScreenshotHost: all
+        NameAlertScreenshots: [test]
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - NameAlertScreenshots
