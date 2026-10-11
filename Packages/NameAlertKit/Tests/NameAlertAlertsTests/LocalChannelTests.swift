@@ -10,11 +10,20 @@ import UserNotifications
 
 private let ruleID = UUID(uuidString: "00000000-0000-0000-0000-0000000000AA")!
 
-private func sampleHit(term: String = "Bala", context: String = "…can Bala share the deck…") -> Hit {
+private func sampleHit(
+    term: String = "Bala", context: String = "…can Bala share the deck…", excerpt: String? = nil
+) -> Hit {
     Hit(
         id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!, ruleID: ruleID, ruleName: "My name", term: term,
         matchedText: term, context: context, timestamp: Date(timeIntervalSince1970: 1_760_175_000),
-        source: .systemAudio, engine: .appleSpeechTranscriber, segmentID: "s1")
+        source: .systemAudio, engine: .appleSpeechTranscriber, segmentID: "s1", excerpt: excerpt)
+}
+
+/// The body of the notification for `hit`, with the context switched on unless said otherwise.
+private func body(of hit: Hit, includeContext: Bool = true) -> String {
+    var settings = NotificationSettings()
+    settings.includeContext = includeContext
+    return NotificationChannel.makeContent(for: hit, settings: settings).body
 }
 
 private func content(_ term: String = "Bala") -> AlarmContent { AlarmContent(hit: sampleHit(term: term)) }
@@ -50,6 +59,63 @@ struct LocalChannelsTests {
     @Test func notificationWithNothingHeardAroundTheTermShowsTheRuleName() {
         let content = NotificationChannel.makeContent(for: sampleHit(context: "  \n"), settings: NotificationSettings())
         #expect(content.body == "My name")
+    }
+
+    // MARK: Notification with an excerpt
+
+    @Test func notificationAddsTheEndOfTheExcerptUnderTheContext() {
+        let hit = sampleHit(excerpt: "…what do you think, Bala")
+
+        let content = NotificationChannel.makeContent(for: hit, settings: NotificationSettings())
+
+        #expect(content.body == "…can Bala share the deck…\n…what do you think, Bala")
+        #expect(content.title == "Heard “Bala”")  // the title does not change
+        #expect(content.categoryIdentifier == "HIT")
+        #expect(content.threadIdentifier == ruleID.uuidString)
+    }
+
+    @Test func notificationKeepsTheLastHundredAndTwentyCharactersOfALongExcerpt() {
+        let tail = String(repeating: "b", count: 120)
+        let hit = sampleHit(excerpt: String(repeating: "a", count: 80) + tail)  // 200 characters
+
+        #expect(body(of: hit) == "…can Bala share the deck…\n…" + tail)  // cut, so it starts with an ellipsis
+    }
+
+    @Test func notificationShowsAnExcerptOfExactlyThePermittedLengthWhole() {
+        let exact = String(repeating: "y", count: 120)
+        #expect(body(of: sampleHit(excerpt: exact)) == "…can Bala share the deck…\n" + exact)  // not cut: no ellipsis
+
+        let oneOver = "x" + exact  // 121 characters: the first one goes
+        #expect(body(of: sampleHit(excerpt: oneOver)) == "…can Bala share the deck…\n…" + exact)
+    }
+
+    @Test func notificationCutsTheExcerptBetweenCharactersNeverInsideOne() {
+        let family = "👨‍👩‍👧‍👦"  // one character made of seven scalars
+        let hit = sampleHit(excerpt: "aaaaa" + family + String(repeating: "b", count: 115))  // 121 characters
+
+        // The last 120 characters start with the fourth "a" and keep the family whole.
+        #expect(body(of: hit) == "…can Bala share the deck…\n…aaaa" + family + String(repeating: "b", count: 115))
+    }
+
+    @Test func notificationTrimsSpacesAroundTheExcerpt() {
+        #expect(body(of: sampleHit(excerpt: " \n  and then Bala \n")) == "…can Bala share the deck…\nand then Bala")
+    }
+
+    @Test func notificationWithoutContextKeepsTheExcerptOut() {
+        let hit = sampleHit(excerpt: "…what do you think, Bala")
+
+        #expect(body(of: hit, includeContext: false) == "My name")  // the user keeps what was heard out of notifications
+    }
+
+    @Test func notificationIgnoresAnExcerptWithNothingInIt() {
+        for excerpt in [nil, "", "   \n "] {
+            #expect(body(of: sampleHit(excerpt: excerpt)) == "…can Bala share the deck…", "for \(excerpt.debugDescription)")
+        }
+    }
+
+    @Test func notificationShowsTheExcerptAloneWhenThereIsNoContext() {
+        #expect(body(of: sampleHit(context: "  \n", excerpt: "…what do you think, Bala")) == "…what do you think, Bala")
+        #expect(body(of: sampleHit(context: "  \n", excerpt: nil)) == "My name")  // nothing heard at all: the rule's name
     }
 
     @Test func categoryIDs() {
@@ -99,6 +165,25 @@ struct LocalChannelsTests {
         #expect(content.title == "Heard “Bala”")
         #expect(content.ruleName == "My name")
         #expect(content.context == "…can Bala share the deck…")
+        #expect(content.excerpt == nil)
+    }
+
+    @Test func alarmContentCarriesTheExcerptWhole() {
+        let long = String(repeating: "and then Bala said something. ", count: 20)  // 600 characters, with a final space
+
+        #expect(AlarmContent(hit: sampleHit(excerpt: "…what do you think, Bala")).excerpt == "…what do you think, Bala")
+        #expect(AlarmContent(hit: sampleHit(excerpt: long)).excerpt == long.trimmingCharacters(in: .whitespaces))
+    }
+
+    @Test func alarmContentHasNoExcerptWhenThereIsNothingToShow() {
+        for excerpt in [nil, "", " \n  "] {
+            #expect(AlarmContent(hit: sampleHit(excerpt: excerpt)).excerpt == nil, "for \(excerpt.debugDescription)")
+        }
+    }
+
+    @Test func alarmContentsDifferByTheirExcerpt() {
+        #expect(AlarmContent(hit: sampleHit(excerpt: "one")) != AlarmContent(hit: sampleHit(excerpt: "two")))
+        #expect(AlarmContent(hit: sampleHit(excerpt: "one")) == AlarmContent(hit: sampleHit(excerpt: "one")))
     }
 
     // MARK: Alarm state

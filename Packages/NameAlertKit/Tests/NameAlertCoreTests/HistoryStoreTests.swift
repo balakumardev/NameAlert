@@ -318,6 +318,42 @@ struct HistoryStoreTests {
         }
     }
 
+    @Test func excerptSurvivesTheFile() async throws {
+        try await inTemporaryDirectory { directory in
+            let file = directory.appendingPathComponent("history.json")
+            var withExcerpt = makeHit(1)
+            withExcerpt.excerpt = "…what do you think, matched 1"
+            let without = makeHit(2)
+            let writer = HistoryStore(fileURL: file, debounce: neverByItself)
+            await writer.append(withExcerpt)
+            await writer.append(without)
+            await writer.flush()
+
+            let loaded = await HistoryStore(fileURL: file, debounce: neverByItself).load()
+            #expect(loaded == [without, withExcerpt])
+            #expect(loaded.map(\.excerpt) == [nil, "…what do you think, matched 1"])
+            // A hit with no excerpt has no key in the file at all.
+            let entryWithout = try entry(for: without)
+            let entryWith = try entry(for: withExcerpt)
+            #expect(entryWithout["excerpt"] == nil)
+            #expect(entryWith["excerpt"] as? String == "…what do you think, matched 1")
+        }
+    }
+
+    @Test func historyFromBeforeExcerptsStillLoads() throws {
+        var hit = makeHit(1)
+        hit.excerpt = "…something said earlier"
+        var oldEntry = try entry(for: hit)
+        oldEntry["excerpt"] = nil  // what a build from before excerpts wrote
+        var expected = hit
+        expected.excerpt = nil
+
+        let decoded = try HistoryStore.decodeHits(from: fileData([oldEntry]))
+
+        #expect(decoded.hits == [expected])
+        #expect(decoded.skipped == 0)
+    }
+
     @Test(arguments: [
         Data(),
         Data("   \n".utf8),

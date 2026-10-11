@@ -7,11 +7,16 @@ struct AlarmContent: Equatable, Sendable {
     let title: String
     let ruleName: String
     let context: String
+    /// What was said just before the term, when the hit has it: the excerpt without the spaces around it. `nil` when
+    /// the hit has none or it is blank, so that the panel shows no empty box.
+    let excerpt: String?
 
     init(hit: Hit) {
         title = "Heard “\(hit.term)”"
         ruleName = hit.ruleName
         context = hit.context
+        let trimmed = hit.excerpt?.trimmingCharacters(in: .whitespacesAndNewlines)
+        excerpt = trimmed?.isEmpty == false ? trimmed : nil
     }
 }
 

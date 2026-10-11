@@ -366,6 +366,53 @@ struct ConfigurationCodingTests {
         )
         let data = try JSONEncoder().encode(hit)
         #expect(try JSONDecoder().decode(Hit.self, from: data) == hit)
+        #expect(hit.excerpt == nil)  // a hit has no excerpt unless one is set
+    }
+
+    @Test func hitRoundTripKeepsTheExcerpt() throws {
+        let hit = Hit(
+            ruleID: UUID(), ruleName: "Bala", term: "Bala", matchedText: "bala", context: "hey bala, lunch?",
+            timestamp: Date(timeIntervalSinceReferenceDate: 781_692_800.25), source: .microphone,
+            engine: .whisperLight, segmentID: "seg-1", excerpt: "…so what do you think about lunch, hey bala"
+        )
+        let decoded = try JSONDecoder().decode(Hit.self, from: JSONEncoder().encode(hit))
+        #expect(decoded == hit)
+        #expect(decoded.excerpt == "…so what do you think about lunch, hey bala")
+
+        var changed = hit
+        changed.excerpt = nil
+        #expect(changed != hit)  // the excerpt counts when hits are compared
+    }
+
+    /// A hit exactly as a build from before excerpts wrote it (the dates are seconds since 2001, the default).
+    private static let hitJSONWithoutAnExcerpt = """
+        {"id":"00000000-0000-0000-0000-000000000001","ruleID":"00000000-0000-0000-0000-0000000000AA",\
+        "ruleName":"Bala","term":"Bala","matchedText":"bala","context":"hey bala, lunch?",\
+        "timestamp":781692800.25,"source":"microphone","engine":"whisperLight","segmentID":"seg-1"
+        """
+
+    @Test func hitWrittenBeforeExcerptsReadsBackWithNone() throws {
+        let hit = try JSONDecoder().decode(Hit.self, from: Data((Self.hitJSONWithoutAnExcerpt + "}").utf8))
+
+        #expect(hit.excerpt == nil)
+        #expect(hit.context == "hey bala, lunch?")
+        #expect(hit.segmentID == "seg-1")
+    }
+
+    @Test func hitWithANullExcerptReadsBackWithNone() throws {
+        let hit = try JSONDecoder().decode(
+            Hit.self, from: Data((Self.hitJSONWithoutAnExcerpt + #","excerpt":null}"#).utf8))
+
+        #expect(hit.excerpt == nil)
+    }
+
+    @Test func hitWithoutAnExcerptIsWrittenWithoutTheKey() throws {
+        let hit = try JSONDecoder().decode(Hit.self, from: Data((Self.hitJSONWithoutAnExcerpt + "}").utf8))
+
+        let written = try JSONSerialization.jsonObject(with: JSONEncoder().encode(hit))
+        let object = try #require(written as? [String: Any])
+        #expect(object["excerpt"] == nil)  // not even a null: files and payloads stay as small as they were
+        #expect(object.count == 10)
     }
 
     @Test func appPaths() {

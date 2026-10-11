@@ -165,8 +165,12 @@ final class AlarmPanel {
     }
 }
 
-/// What the alarm panel shows: the title, the rule, the words around the term, and the two buttons.
+/// What the alarm panel shows: the title, the rule, the words around the term, what was said just before them (when
+/// the hit has it), and the two buttons.
 struct AlarmView: View {
+    /// How many lines of the excerpt show before it needs scrolling.
+    static let excerptLines = 5
+
     let content: AlarmContent
     let onDismiss: () -> Void
     let onSnooze: () -> Void
@@ -185,6 +189,9 @@ struct AlarmView: View {
                 Text(content.context)
                     .font(.body)
             }
+            if let excerpt = content.excerpt {
+                AlarmExcerptView(text: excerpt)
+            }
             HStack {
                 Spacer()
                 Button("Snooze 15 min", action: onSnooze)
@@ -198,5 +205,35 @@ struct AlarmView: View {
         .padding(.horizontal, 16)
         .padding(.bottom, 16)  // the title bar above already gives the top its room
         .frame(width: AlarmPanel.width, alignment: .leading)
+    }
+}
+
+/// What was said just before the term, in a box that holds `AlarmView.excerptLines` lines at most: secondary-colored
+/// text that can be selected, and scrolls when it is longer. The excerpt ends with the term, so a long one starts out
+/// scrolled to its end, where the words that matter most are.
+struct AlarmExcerptView: View {
+    let text: String
+
+    var body: some View {
+        // The invisible copy, limited to the lines allowed, sets the size of the box: as high as the text is, but
+        // never higher than that many lines. The scrolling copy lies over it. That way nothing has to be measured,
+        // and the size is right the first time the panel lays itself out, which is when its window gets its height.
+        Text(text)
+            .font(.callout)
+            .lineLimit(AlarmView.excerptLines)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .hidden()
+            .overlay(alignment: .top) {
+                ScrollView {
+                    Text(text)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityLabel("Recent transcript: \(text)")
+                }
+                .defaultScrollAnchor(.bottom)
+                .id(text)  // a new hit's words start at the end again, wherever the last ones were scrolled to
+            }
     }
 }

@@ -7,15 +7,18 @@ import os
 // MARK: - Helpers
 
 /// The hit every test uses unless it says otherwise.
-private func sampleHit(segmentID: String = "s1", term: String = "Bala", context: String = "…can Bala share the deck…")
-    -> Hit
-{
+private func sampleHit(
+    segmentID: String = "s1", term: String = "Bala", context: String = "…can Bala share the deck…",
+    excerpt: String? = nil
+) -> Hit {
     Hit(
         id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
         ruleID: UUID(uuidString: "00000000-0000-0000-0000-0000000000AA")!, ruleName: "My name", term: term,
         matchedText: "Bala", context: context, timestamp: Date(timeIntervalSince1970: 1_760_175_000),
-        source: .systemAudio, engine: .appleSpeechTranscriber, segmentID: segmentID)
+        source: .systemAudio, engine: .appleSpeechTranscriber, segmentID: segmentID, excerpt: excerpt)
 }
+
+private let sampleExcerpt = "…what do you think, Bala, can you share the deck…"
 
 /// The sleeps a client was asked to make, instead of making them.
 private final class SleepLog: Sendable {
@@ -97,6 +100,10 @@ private func queryItems(of request: URLRequest) -> [String: String] {
 private let expectedBody =
     #"{"app":{"build":"123","version":"1.0.0"},"context":"…can Bala share the deck…","engine":"appleSpeechTranscriber","event":"keyword.detected","id":"00000000-0000-0000-0000-000000000001","matchedText":"Bala","rule":{"id":"00000000-0000-0000-0000-0000000000AA","name":"My name"},"source":"systemAudio","term":"Bala","timestamp":"2025-10-11T09:30:00Z","version":1}"#
 
+/// The same body with the hit's excerpt: one more key, in its place among the sorted ones.
+private let expectedBodyWithExcerpt =
+    #"{"app":{"build":"123","version":"1.0.0"},"context":"…can Bala share the deck…","engine":"appleSpeechTranscriber","event":"keyword.detected","excerpt":"…what do you think, Bala, can you share the deck…","id":"00000000-0000-0000-0000-000000000001","matchedText":"Bala","rule":{"id":"00000000-0000-0000-0000-0000000000AA","name":"My name"},"source":"systemAudio","term":"Bala","timestamp":"2025-10-11T09:30:00Z","version":1}"#
+
 // MARK: - Tests
 
 @Suite("NetworkChannels", .timeLimit(.minutes(1)))
@@ -106,6 +113,27 @@ struct NetworkChannelsTests {
     @Test func webhookBodyExact() throws {
         let body = try WebhookPayload.body(for: sampleHit(), event: "keyword.detected", appVersion: "1.0.0", build: "123")
         #expect(String(decoding: body, as: UTF8.self) == expectedBody)
+    }
+
+    @Test func webhookBodyHasTheExcerptWhenTheHitHasOne() throws {
+        let body = try WebhookPayload.body(
+            for: sampleHit(excerpt: sampleExcerpt), event: "keyword.detected", appVersion: "1.0.0", build: "123")
+
+        #expect(String(decoding: body, as: UTF8.self) == expectedBodyWithExcerpt)
+        let json = try JSONSerialization.jsonObject(with: body)
+        let object = try #require(json as? [String: Any])
+        #expect(object["excerpt"] as? String == sampleExcerpt)
+        #expect(object.count == 12)  // the eleven keys of the body, and this one
+    }
+
+    @Test func webhookBodyLeavesTheExcerptOutWhenTheHitHasNone() throws {
+        let body = try WebhookPayload.body(for: sampleHit(), event: "keyword.detected", appVersion: "1.0.0", build: "123")
+
+        let json = try JSONSerialization.jsonObject(with: body)
+        let object = try #require(json as? [String: Any])
+        #expect(object["excerpt"] == nil)  // no key, not even a null
+        #expect(object.count == 11)
+        #expect(!String(decoding: body, as: UTF8.self).contains("excerpt"))
     }
 
     @Test func webhookBodyKeepsSlashesAndDropsFractionalSeconds() throws {
@@ -301,6 +329,22 @@ struct NetworkChannelsTests {
         #expect(sent.request.timeoutInterval == 5)
         #expect(sent.bodyText == expectedBody)
         #expect(sent.header("X-NameAlert-Signature") == nil)  // no signing secret, no signature
+    }
+
+    @Test func webhookRequestCarriesTheExcerptAndTheSignatureCoversIt() async throws {
+        let server = StubServer()
+        let secrets = InMemorySecretStore([SecretAccount.webhookSigningSecret: "s3cret"])
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+        try await webhookChannel(server, now: { now }).deliver(
+            sampleHit(excerpt: sampleExcerpt), settings: webhookSettings(), secrets: secrets)
+
+        let sent = try #require(server.onlyRequest)
+        #expect(sent.bodyText == expectedBodyWithExcerpt)
+        #expect(
+            sent.header("X-NameAlert-Signature")
+                == WebhookPayload.signatureHeader(
+                    body: Data(expectedBodyWithExcerpt.utf8), secret: "s3cret", timestamp: 1_700_000_000))
     }
 
     @Test func webhookEventIsTestForTheSampleHit() async throws {

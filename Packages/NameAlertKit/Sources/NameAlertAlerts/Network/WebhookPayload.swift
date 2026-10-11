@@ -5,7 +5,8 @@ import NameAlertCore
 /// What the webhook channel sends, and how it signs it.
 ///
 /// The body is JSON with its keys in alphabetical order and no escaped slashes, so that the same hit always gives
-/// the same bytes; the time is ISO 8601 in UTC, to the second.
+/// the same bytes; the time is ISO 8601 in UTC, to the second. The `excerpt` key is there only when the hit has an
+/// excerpt: without one the body is exactly what it was before excerpts existed.
 public enum WebhookPayload {
     /// The body of the request for `hit`. `event` is `keyword.detected` for a real hit and `test` for a test.
     public static func body(for hit: Hit, event: String, appVersion: String, build: String) throws -> Data {
@@ -13,7 +14,7 @@ public enum WebhookPayload {
             event: event, version: 1, id: hit.id, timestamp: hit.timestamp,
             rule: RuleSummary(id: hit.ruleID, name: hit.ruleName), term: hit.term, matchedText: hit.matchedText,
             context: hit.context, source: hit.source, engine: hit.engine,
-            app: AppSummary(version: appVersion, build: build))
+            app: AppSummary(version: appVersion, build: build), excerpt: hit.excerpt)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         encoder.dateEncodingStrategy = .iso8601
@@ -45,6 +46,8 @@ public enum WebhookPayload {
         let source: AudioSourceKind
         let engine: EngineID
         let app: AppSummary
+        /// Left out of the JSON when `nil` (a synthesized `encode` skips an optional that has no value).
+        let excerpt: String?
     }
 
     private struct RuleSummary: Encodable {
