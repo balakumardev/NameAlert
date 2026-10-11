@@ -12,6 +12,9 @@ extension Sensitivity {
     /// Whether the heard word counts as the term at this sensitivity. Both are already normalized, and `len`
     /// below is the number of characters in `term`.
     ///
+    /// A word with a digit in it, on either side, only ever matches by being equal, at every sensitivity: "room101"
+    /// is not "room102", and "45213" is not "45231".
+    ///
     /// - `exact`: the words are equal.
     /// - `balanced`: equal; or within `budget(len)` edits; or, for `len >= 4`, a sound-alike (same `NameKey`)
     ///   within 1 edit (`len` up to 5) or 2 edits (longer). Two guards keep it from matching everyday words: a
@@ -32,11 +35,15 @@ extension Sensitivity {
         heard: String, heardLength: Int, heardKey: (_ keepVowels: Bool) -> String
     ) -> Bool {
         if term == heard { return true }
+        if self == .exact { return false }
+        // A number is the same number or another one, never a near miss. This also settles every comparison of
+        // words run together or split apart, which is made on the joined strings.
+        if TextNormalizer.containsDigit(term) || TextNormalizer.containsDigit(heard) { return false }
         // Two words whose lengths differ by more than the edits allowed cannot be that close.
         let lengthGap = abs(heardLength - termLength)
         switch self {
         case .exact:
-            return false
+            return false  // settled above
         case .balanced:
             let budget = Self.budget(forLength: termLength)
             let soundAlikeEdits = termLength >= 4 ? (termLength <= 5 ? 1 : 2) : 0

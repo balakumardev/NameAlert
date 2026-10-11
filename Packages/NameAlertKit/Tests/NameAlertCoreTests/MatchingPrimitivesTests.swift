@@ -125,6 +125,19 @@ private let matchEdgeRows: [(String, String, Bool, Bool, Bool)] = [
     ("42", "42", true, true, true),
 ]
 
+/// A word with a digit in it, on either side, is equal or it is another word, whatever the sensitivity.
+/// Each of these pairs is within the edits that Balanced or Loose would otherwise allow.
+private let numberRows: [(String, String)] = [
+    ("room101", "room102"),  // one digit off
+    ("45213", "45231"),  // two digits swapped
+    ("101", "102"),
+    ("b2b", "bab"),  // a digit against a letter
+    ("bala", "bala1"),  // a digit added to a word
+    ("bala2", "bala"),
+    ("a1b", "a1c"),
+    ("\u{0662}\u{0660}", "\u{0662}\u{0661}"),  // "٢٠" against "٢١": the digits of other scripts count too
+]
+
 /// Balanced must not take these for the name: an everyday word, or a word one vowel away from it. Term, heard.
 /// ("logan", "login") is missing on purpose: "login" is not in SCOWL at any size, so see `loginIsAKnownGap`.
 private let everydayWordRows: [(String, String)] = [
@@ -265,6 +278,14 @@ struct MatchingPrimitivesTests {
     @Test func loginIsAKnownGap() {
         withKnownIssue("SCOWL has no \"login\", so Balanced still takes it for Logan") {
             #expect(!Sensitivity.balanced.matches(term: "logan", heard: "login"))
+        }
+    }
+
+    @Test(arguments: numberRows)
+    func numbersMatchOnlyExactly(term: String, heard: String) {
+        for sensitivity in Sensitivity.allCases {
+            #expect(!sensitivity.matches(term: term, heard: heard), "\(sensitivity): \(term) vs \(heard)")
+            #expect(sensitivity.matches(term: term, heard: term), "\(sensitivity): \(term) vs itself")
         }
     }
 

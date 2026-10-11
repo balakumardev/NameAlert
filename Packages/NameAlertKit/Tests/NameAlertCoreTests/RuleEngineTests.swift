@@ -369,6 +369,28 @@ struct RuleEngineTests {
         #expect(RuleEngine.matches(in: "a j k", rule: Rule(name: "N", terms: ["AJK"], sensitivity: sensitivity)).count == 1)
     }
 
+    // MARK: Numbers
+
+    /// Keywords with numbers in them, what is heard, and how many hits that makes. Each pair that finds nothing is
+    /// within the edits Balanced and Loose would allow for a word; a number is equal or it is another number.
+    private static let numberRows: [(term: String, text: String, hits: Int)] = [
+        ("Room 101", "meet in room 102", 0),
+        ("Room 101", "meet in room 101", 1),
+        ("Room 101", "meet in room101", 1),  // split apart by the recognizer
+        ("Room 101", "meet in room102", 0),
+        ("room101", "room 101 please", 1),  // run together in the term, spoken in two words
+        ("room101", "room 102 please", 0),
+        ("45213", "code 45231", 0),
+        ("45213", "code 45213", 1),
+    ]
+
+    @Test(arguments: numberRows.flatMap { row in Sensitivity.allCases.map { (row, $0) } })
+    func numbersMatchOnlyExactly(row: (term: String, text: String, hits: Int), sensitivity: Sensitivity) {
+        var engine = RuleEngine(rules: [Rule(name: "N", terms: [row.term], sensitivity: sensitivity)])
+        let hits = engine.hear(segment("s1", row.text), at: t0)
+        #expect(hits.count == row.hits, "\(sensitivity): \(row.term) in \"\(row.text)\"")
+    }
+
     @Test func matchesDoNotOverlap() {
         let rule = Rule(name: "N", terms: ["bala bala", "bala"])
         let results = RuleEngine.matches(in: "bala bala bala", rule: rule)
@@ -497,6 +519,37 @@ struct RuleEngineTests {
         var hits: [Hit] = []
         let elapsed = clock.measure { hits = engine.hear(update, at: t0) }
         #expect(hits.contains { $0.ruleName == "Rule 3" })  // the exact rule finds the planted name
+        #expect(elapsed < .seconds(10), "took \(elapsed)")
+    }
+
+    /// The same, with terms made of letters only. A word with a digit in it is only ever compared for equality, so
+    /// the test above hardly reaches the edit distances and name keys of Balanced and Loose; this one does.
+    @Test func fuzzyEvaluationGrowsLinearlyWithTheTextLength() {
+        let vocabulary = ["the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog", "stand", "up", "meeting"]
+        let syllables = ["ka", "lo", "mi", "ne", "ra", "su", "ti", "vo", "xe", "zu"]
+        func first(_ rule: Int, _ term: Int) -> String { syllables[rule] + syllables[term] + "nam" }
+        func second(_ rule: Int, _ term: Int) -> String { syllables[(rule + term) % 10] + "sur" }
+        let rules = (0..<10).map { index in
+            Rule(
+                name: "Rule \(index)",
+                terms: (0..<5).map { "\(first(index, $0)) \(second(index, $0))" },
+                sensitivity: Sensitivity.allCases[index % 3])
+        }
+        var engine = RuleEngine(rules: rules)
+        var words = (0..<1_200).map { vocabulary[$0 % vocabulary.count] }
+        words[1_000] = first(3, 2)  // rule 3 is Exact: the name as it is
+        words[1_001] = second(3, 2)
+        words[600] = "x" + first(4, 1).dropFirst()  // rule 4 is Balanced: one letter wrong
+        words[601] = second(4, 1)
+        let reversed = words.reversed().joined(separator: " ")
+        let update = segment("s1", words.joined(separator: " "), alternatives: [reversed])
+        #expect(update.text.count > 5_000)
+
+        let clock = ContinuousClock()
+        var hits: [Hit] = []
+        let elapsed = clock.measure { hits = engine.hear(update, at: t0) }
+        #expect(hits.contains { $0.ruleName == "Rule 3" })
+        #expect(hits.contains { $0.ruleName == "Rule 4" })
         #expect(elapsed < .seconds(10), "took \(elapsed)")
     }
 }

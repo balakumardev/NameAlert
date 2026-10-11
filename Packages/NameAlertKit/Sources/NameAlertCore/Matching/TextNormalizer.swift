@@ -82,6 +82,12 @@ public enum TextNormalizer {
         tokens(term)
     }
 
+    /// Whether `token` has a digit in it: any character the tokenizer counts as a number (the digits of every
+    /// script, and number-like characters such as `²` and `Ⅷ`).
+    static func containsDigit(_ token: String) -> Bool {
+        token.unicodeScalars.contains { ScalarKind($0) == .number }
+    }
+
     /// `text` with case, accents and character width folded away. Plain ASCII only needs lowercasing, which
     /// is what the library call would give, so it skips the (much slower) folding.
     static func fold(_ text: String) -> String {

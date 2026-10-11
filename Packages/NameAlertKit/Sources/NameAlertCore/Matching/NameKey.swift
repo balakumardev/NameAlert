@@ -23,7 +23,7 @@ public enum NameKey {
     /// only, so Mike is `mike` and not `m*k*` (and is no longer the same as make), while Bala, Bhala, Balla and
     /// Baala are all still `bala`. With `keepVowels` false this is `key(_:)`.
     static func key(_ token: String, keepVowels: Bool) -> String {
-        if token.unicodeScalars.contains(where: isNumber) { return token }
+        if TextNormalizer.containsDigit(token) { return token }
 
         let letters = Array(TextNormalizer.fold(token).unicodeScalars.filter(isLetterOrMark))  // step 1
         let digraphsReplaced = replaceDigraphs(in: letters)  // step 2
@@ -36,14 +36,6 @@ public enum NameKey {
             return String(kept)
         }
         return String(maskVowels(in: collapsed))  // step 6
-    }
-
-    private static func isNumber(_ scalar: Unicode.Scalar) -> Bool {
-        if scalar.isASCII { return (0x30...0x39).contains(scalar.value) }
-        switch scalar.properties.generalCategory {
-        case .decimalNumber, .letterNumber, .otherNumber: return true
-        default: return false
-        }
     }
 
     /// A letter, or a mark that follows one. Folding has already removed the accents of Latin, Greek and Cyrillic,
