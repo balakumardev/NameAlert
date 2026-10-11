@@ -5,8 +5,10 @@ import NameAlertCore
 /// Turns the buffers a capture device or ScreenCaptureKit delivers into 16 kHz mono Float32 samples, the format the
 /// rest of the app works in.
 ///
-/// Any PCM format is accepted (other sample rates, Int16, interleaved, several channels). Channels are averaged into
-/// one. A buffer that is already 16 kHz mono Float32 passes straight through.
+/// Any PCM format is accepted (other sample rates, Int16, interleaved, several channels). Several channels are
+/// averaged into one, but only those that are about as loud as the loudest (see `average`), so that a microphone on
+/// one input of a multi-channel interface is not diluted by the inputs with nothing on them. A buffer that is
+/// already 16 kHz mono Float32 passes straight through.
 ///
 /// One `AVAudioConverter` is kept for the current input format and replaced when the format changes, for example
 /// when the user switches the output device. Keeping it between buffers keeps the resampler's history, so there is
@@ -20,6 +22,10 @@ public final class AudioFormatConverter: @unchecked Sendable {
     /// 6 % short, and over two such buffers about 600 samples were lost for good), and a microphone tap may
     /// deliver buffers of 100 to 400 ms.
     private static let sliceFrames = 4_096
+
+    /// How far below the loudest channel a channel may be, by RMS, and still be averaged in: 12 dB, as an amplitude
+    /// ratio.
+    private static let activeChannelWindow = Float(pow(10.0, -12.0 / 20.0))
 
     private static let log = Log.logger("audio")
 
@@ -202,18 +208,40 @@ public final class AudioFormatConverter: @unchecked Sendable {
         return true
     }
 
-    /// The mean of the channels, sample by sample.
+    /// The mean, sample by sample, of the channels that are about as loud as the loudest one.
+    ///
+    /// Averaging every channel would divide a microphone that sits on one input of a multi-channel interface by the
+    /// number of inputs (a voice 12 dB down with four of them), because the other inputs carry nothing or only hiss.
+    /// So the RMS of each channel is measured over this buffer, and a channel more than 12 dB below the loudest one is
+    /// left out. Channels that are about as loud, such as the two sides of a stereo pair or one voice that several
+    /// inputs pick up, are averaged as before. When every channel is silent there is no loudest one to measure
+    /// against, and the result is silence.
     private static func average(
         _ channels: UnsafePointer<UnsafeMutablePointer<Float>>, channelCount: Int, frames: Int
     ) -> [Float] {
-        var mixed = [Float](repeating: 0, count: frames)
+        var rms = [Float](repeating: 0, count: channelCount)
         for channel in 0 ..< channelCount {
+            let samples = channels[channel]
+            var energy: Float = 0
+            for frame in 0 ..< frames {
+                energy += samples[frame] * samples[frame]
+            }
+            rms[channel] = (energy / Float(frames)).squareRoot()
+        }
+        var mixed = [Float](repeating: 0, count: frames)
+        guard let loudest = rms.max(), loudest > 0 else { return mixed }
+
+        // The loudest channel always passes, so at least one is averaged.
+        let threshold = loudest * activeChannelWindow
+        var averaged = 0
+        for channel in 0 ..< channelCount where rms[channel] >= threshold {
             let samples = channels[channel]
             for frame in 0 ..< frames {
                 mixed[frame] += samples[frame]
             }
+            averaged += 1
         }
-        let scale = 1 / Float(channelCount)
+        let scale = 1 / Float(averaged)
         for frame in 0 ..< frames {
             mixed[frame] *= scale
         }

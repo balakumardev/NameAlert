@@ -8,6 +8,7 @@ import Testing
 /// A Float32 buffer holding a `frequency` Hz sine wave in every channel, or only in `activeChannels`.
 ///
 /// `firstFrame` continues the wave where an earlier buffer ended, so consecutive buffers form one signal.
+/// `gains`, one per channel, scale `amplitude` channel by channel.
 /// A `layout` makes the format carry that channel layout (needed for more than two channels).
 private func makeSineBuffer(
     sampleRate: Double,
@@ -16,6 +17,7 @@ private func makeSineBuffer(
     firstFrame: Int = 0,
     frequency: Double = 440,
     amplitude: Float = 0.8,
+    gains: [Float]? = nil,
     activeChannels: Set<Int>? = nil,
     layout: AVAudioChannelLayout? = nil
 ) throws -> AVAudioPCMBuffer {
@@ -32,9 +34,10 @@ private func makeSineBuffer(
     let data = try #require(buffer.floatChannelData)
     for channel in 0 ..< Int(format.channelCount) {
         let isActive = activeChannels?.contains(channel) ?? true
+        let level = amplitude * (gains?[channel] ?? 1)
         for frame in 0 ..< frames {
             let phase = 2 * Double.pi * frequency * Double(firstFrame + frame) / sampleRate
-            data[channel][frame] = isActive ? amplitude * Float(sin(phase)) : 0
+            data[channel][frame] = isActive ? level * Float(sin(phase)) : 0
         }
     }
     return buffer
@@ -139,6 +142,48 @@ struct AudioProcessingTests {
             #expect(abs(samples.count - 8_000) <= 80, "got \(samples.count) samples")
             #expect(peak(samples) > 0.1, "input \(active + 1) alone gave a peak of \(peak(samples))")
         }
+    }
+
+    /// Only the channels that are about as loud as the loudest one are averaged, so a microphone on one input of a
+    /// four-input interface does not lose three quarters of its level to the three inputs with nothing on them.
+    @Test func aVoiceOnOneOfFourInputsKeepsItsLevel() throws {
+        let layout = try #require(AVAudioChannelLayout(layoutTag: kAudioChannelLayoutTag_DiscreteInOrder | 4))
+        let input = try makeSineBuffer(
+            sampleRate: 48_000, channels: 4, frames: 24_000, activeChannels: [2], layout: layout)
+        let samples = AudioFormatConverter().convert(input)
+        #expect(abs(samples.count - 8_000) <= 80, "got \(samples.count) samples")
+        #expect(peak(samples) >= 0.7, "peak \(peak(samples))")
+    }
+
+    /// One voice that reaches several inputs is not thinned out: every one of them is averaged in.
+    @Test func correlatedChannelsAreAllAveraged() throws {
+        let layout = try #require(AVAudioChannelLayout(layoutTag: kAudioChannelLayoutTag_DiscreteInOrder | 3))
+        let input = try makeSineBuffer(sampleRate: 48_000, channels: 3, frames: 24_000, layout: layout)
+        let samples = AudioFormatConverter().convert(input)
+        #expect(peak(samples) >= 0.7, "peak \(peak(samples))")
+    }
+
+    /// 0.8 and 0.4 are 6 dB apart, inside the 12 dB window: both are averaged, which gives 0.6.
+    @Test func channelsWithinTwelveDecibelsAreBothAveraged() throws {
+        let input = try makeSineBuffer(sampleRate: 48_000, channels: 2, frames: 48_000, gains: [1, 0.5])
+        let samples = AudioFormatConverter().convert(input)
+        #expect(abs(peak(samples) - 0.6) <= 0.05, "peak \(peak(samples))")
+    }
+
+    /// 0.8 and 0.1 are 18 dB apart: the quiet channel is left out instead of pulling the voice down to 0.45.
+    @Test func aChannelMoreThanTwelveDecibelsBelowTheLoudestIsLeftOut() throws {
+        let input = try makeSineBuffer(sampleRate: 48_000, channels: 2, frames: 48_000, gains: [1, 0.125])
+        let samples = AudioFormatConverter().convert(input)
+        #expect(abs(peak(samples) - 0.8) <= 0.05, "peak \(peak(samples))")
+    }
+
+    /// With nothing on any input there is no loudest channel to measure the others against: the output is silence.
+    @Test func inputsThatAreAllSilentGiveSilence() throws {
+        let layout = try #require(AVAudioChannelLayout(layoutTag: kAudioChannelLayoutTag_DiscreteInOrder | 4))
+        let input = try makeSineBuffer(sampleRate: 48_000, channels: 4, frames: 24_000, amplitude: 0, layout: layout)
+        let samples = AudioFormatConverter().convert(input)
+        #expect(abs(samples.count - 8_000) <= 80, "got \(samples.count) samples")
+        #expect(samples.allSatisfy { $0 == 0 })
     }
 
     @Test func convertsAnyPCMFormat() throws {
