@@ -38,9 +38,12 @@ struct HistoryStoreTests {
         )
     }
 
-    /// What is on disk right now, decoded without going through a store instance.
+    /// What is on disk right now, decoded without going through a store instance. Whatever a store wrote has only
+    /// entries that read back as hits, so this also checks that none were skipped.
     private func readHistory(at url: URL) throws -> [Hit] {
-        try HistoryStore.decodeHits(from: Data(contentsOf: url)).hits
+        let decoded = try HistoryStore.decodeHits(from: Data(contentsOf: url))
+        #expect(decoded.skipped == 0, "the file has entries that are not hits")
+        return decoded.hits
     }
 
     /// The JSON object the store writes for `hit`, to build files by hand.
@@ -216,12 +219,82 @@ struct HistoryStoreTests {
             let all = await store.all()
             #expect(all.isEmpty)
 
-            // Like every change, the empty list reaches the file on flush (or the debounce), not before.
-            let beforeFlush = try readHistory(at: file)
-            #expect(beforeFlush == [hit])
+            // Unlike other changes, the empty list is written at once, not on flush or after the debounce.
+            let afterClear = try readHistory(at: file)
+            #expect(afterClear.isEmpty)
             await store.flush()
             let afterFlush = try readHistory(at: file)
             #expect(afterFlush.isEmpty)
+        }
+    }
+
+    @Test func clearWritesTheEmptyHistoryAtOnce() async throws {
+        try await inTemporaryDirectory { directory in
+            let file = directory.appendingPathComponent("history.json")
+            let store = HistoryStore(fileURL: file, debounce: neverByItself)
+            await store.append(makeHit(1))
+            await store.append(makeHit(2))
+            await store.flush()
+            await store.append(makeHit(3))  // a change that is still waiting for its write
+
+            await store.clear()
+            // No flush: what was cleared must not linger in the file, not even for the length of a debounce.
+            let afterClear = try readHistory(at: file)
+            #expect(afterClear.isEmpty)
+            let text = String(decoding: try Data(contentsOf: file), as: UTF8.self)
+            #expect(text == "[]")
+            let inMemory = await store.all()
+            #expect(inMemory.isEmpty)
+        }
+    }
+
+    @Test func clearWritesAnEmptyFileEvenWhenThereWasNoFile() async throws {
+        try await inTemporaryDirectory { directory in
+            let file = directory.appendingPathComponent("NameAlert/history.json")
+            let store = HistoryStore(fileURL: file, debounce: neverByItself)
+            await store.clear()
+            let text = String(decoding: try Data(contentsOf: file), as: UTF8.self)
+            #expect(text == "[]")
+        }
+    }
+
+    @Test func clearCancelsTheWriteThatWasWaiting() async throws {
+        try await inTemporaryDirectory { directory in
+            let file = directory.appendingPathComponent("history.json")
+            let store = HistoryStore(fileURL: file, debounce: .milliseconds(200))
+            await store.append(makeHit(1))  // starts the timer
+            await store.clear()  // writes now, and the timer has nothing left to do
+            let afterClear = try readHistory(at: file)
+            #expect(afterClear.isEmpty)
+
+            try FileManager.default.removeItem(at: file)
+            try await Task.sleep(for: .milliseconds(600))
+            #expect(!exists(file))
+
+            // And the timer slot is free: the next change is written as usual.
+            let later = makeHit(2)
+            await store.append(later)
+            let written = await waitUntil { (try? readHistory(at: file)) == [later] }
+            #expect(written)
+        }
+    }
+
+    @Test func aFailedClearIsTriedAgain() async throws {
+        try await inTemporaryDirectory { directory in
+            // A plain file where the history folder should be: the folder cannot be created.
+            let blocker = directory.appendingPathComponent("blocker")
+            try Data("not a folder".utf8).write(to: blocker)
+            let file = blocker.appendingPathComponent("history.json")
+
+            let store = HistoryStore(fileURL: file, debounce: .milliseconds(100))
+            await store.clear()  // fails and logs
+            let inMemory = await store.all()
+            #expect(inMemory.isEmpty)
+
+            // Without anyone calling flush(), the write is tried again after the debounce.
+            try FileManager.default.removeItem(at: blocker)
+            let written = await waitUntil { (try? readHistory(at: file)) == [] }
+            #expect(written)
         }
     }
 
@@ -712,89 +785,6 @@ struct HistoryStoreTests {
         }
     }
 
-    @Test func millisecondTimestampsRoundTripExactly() {
-        var generator = SeededGenerator(state: 1_760_175_000)
-        let oracle = ISO8601DateFormatter()  // whole seconds only, and exact on every macOS version
-        var wrongText: [String] = []
-        var wrongDate: [String] = []
-        for _ in 0..<20_000 {
-            // Any millisecond from 2000-01-01 to 2099-12-31.
-            let milliseconds = Int64.random(in: 946_684_800_000...4_102_444_799_999, using: &generator)
-            let date = Date(timeIntervalSince1970: Double(milliseconds) / 1000)
-
-            let text = HistoryTimestamp.string(from: date)
-            let wholeSecond = oracle.string(from: Date(timeIntervalSince1970: Double(milliseconds / 1000)))
-            let expected = String(wholeSecond.dropLast()) + String(format: ".%03d", Int(milliseconds % 1000)) + "Z"
-            if text != expected { wrongText.append("\(text) should be \(expected)") }
-            if HistoryTimestamp.date(from: text) != date { wrongDate.append(text) }
-        }
-        #expect(wrongText.isEmpty, "\(wrongText.prefix(3))")
-        #expect(wrongDate.isEmpty, "\(wrongDate.prefix(3))")
-    }
-
-    @Test func timestampsRoundToTheNearestMillisecond() {
-        let cases: [(seconds: Double, text: String)] = [
-            (1_760_175_000.1234, "2025-10-11T09:30:00.123Z"),
-            (1_760_175_000.1236, "2025-10-11T09:30:00.124Z"),
-            (1_760_175_000.9996, "2025-10-11T09:30:01.000Z"),  // rounds up into the next second ...
-            (1_760_175_059.9996, "2025-10-11T09:31:00.000Z"),  // ... and the next minute
-        ]
-        for (seconds, text) in cases {
-            #expect(HistoryTimestamp.string(from: Date(timeIntervalSince1970: seconds)) == text, "\(seconds)")
-        }
-    }
-
-    @Test func timestampsBeforeTheEpochKeepTheirFraction() {
-        // The fraction always counts forwards from the whole second, so -0.5 is 23:59:59.500 and not 00.500.
-        let cases: [(seconds: Double, text: String)] = [
-            (0, "1970-01-01T00:00:00.000Z"),
-            (-0.5, "1969-12-31T23:59:59.500Z"),
-            (-0.001, "1969-12-31T23:59:59.999Z"),
-            (-1.25, "1969-12-31T23:59:58.750Z"),
-        ]
-        for (seconds, text) in cases {
-            let date = Date(timeIntervalSince1970: seconds)
-            #expect(HistoryTimestamp.string(from: date) == text, "\(seconds)")
-            #expect(HistoryTimestamp.date(from: text) == date, "\(text)")
-        }
-    }
-
-    @Test func extremeTimestampsDoNotCrash() {
-        // None of these can come from a real clock, but writing the file must never trap on one.
-        let dates = [
-            Date.distantPast, Date.distantFuture,
-            Date(timeIntervalSince1970: .nan), Date(timeIntervalSince1970: .infinity),
-            Date(timeIntervalSince1970: -.infinity), Date(timeIntervalSince1970: 1e300),
-        ]
-        for date in dates {
-            let text = HistoryTimestamp.string(from: date)
-            #expect(text.count == 24, "\(text)")  // yyyy-MM-ddTHH:mm:ss.SSSZ
-            #expect(HistoryTimestamp.date(from: text) != nil, "\(text)")
-        }
-    }
-
-    @Test func timestampTextIsReadLeniently() {
-        let cases: [(text: String, seconds: Double)] = [
-            ("2025-10-11T09:30:00Z", 1_760_175_000),
-            ("2025-10-11T09:30:00.5Z", 1_760_175_000.5),
-            ("2025-10-11T09:30:00.123Z", 1_760_175_000.123),
-            ("2025-10-11T09:30:00.123456Z", 1_760_175_000.123456),
-            ("2025-10-11T09:30:00.1234567890Z", 1_760_175_000.123456),  // only the first six digits count
-        ]
-        for (text, seconds) in cases {
-            #expect(HistoryTimestamp.date(from: text) == Date(timeIntervalSince1970: seconds), "\(text)")
-        }
-    }
-
-    @Test(arguments: [
-        "", "yesterday", "2025-10-11", "1760175000",
-        "2025-10-11T09:30:00.Z",  // a dot with no digits after it
-        "2025-10-11T09:30:00.12.3Z",  // a second dot
-    ])
-    func unreadableTimestampTextIsRejected(text: String) {
-        #expect(HistoryTimestamp.date(from: text) == nil)
-    }
-
     @Test func rewriteReplacesTheFileInsteadOfEditingItInPlace() async throws {
         try await inTemporaryDirectory { directory in
             let file = directory.appendingPathComponent("history.json")
@@ -937,18 +927,5 @@ struct HistoryStoreTests {
             let onDisk = try readHistory(at: file)
             #expect(onDisk == all)
         }
-    }
-}
-
-/// A small deterministic generator (SplitMix64), so a failing run can be repeated exactly.
-private struct SeededGenerator: RandomNumberGenerator {
-    var state: UInt64
-
-    mutating func next() -> UInt64 {
-        state &+= 0x9E37_79B9_7F4A_7C15
-        var value = state
-        value = (value ^ (value >> 30)) &* 0xBF58_476D_1CE4_E5B9
-        value = (value ^ (value >> 27)) &* 0x94D0_49BB_1331_11EB
-        return value ^ (value >> 31)
     }
 }

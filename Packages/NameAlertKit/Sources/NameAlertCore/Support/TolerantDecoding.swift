@@ -38,8 +38,9 @@ extension KeyedDecodingContainer {
     }
 }
 
-/// Decodes to `nil` instead of throwing, so an unkeyed container always moves on to the next element.
-private struct Lossy<Element: Decodable>: Decodable {
+/// Decodes to `nil` instead of throwing, so an unkeyed container always moves on to the next element. Decode a list
+/// as `[Lossy<Element>]` and keep what is not `nil`: one entry that cannot be read never takes the others with it.
+struct Lossy<Element: Decodable>: Decodable {
     let element: Element?
 
     init(from decoder: any Decoder) {
