@@ -1,4 +1,5 @@
 import AppKit
+import NameAlertAlerts
 import NameAlertCore
 import NameAlertRuntime
 import SwiftUI
@@ -32,6 +33,116 @@ struct ShellRenderTests {
         let labels = entries.map { StatusIconImage.accessibilityLabel(for: $0.state, justHeard: $0.justHeard) }
         #expect(Set(labels).count == labels.count)
         #expect(labels.allSatisfy { $0.hasPrefix(AppInfo.displayName) })
+    }
+}
+
+@Suite("Shell logic")
+@MainActor
+struct ShellLogicTests {
+    /// A controller on the stand-ins whose saved settings start listening when the app opens, as a Mac that has been set
+    /// up and keeps "Start listening when the app opens" on.
+    private func controllerThatStartsAtLaunch() async -> ListeningController {
+        let dependencies = RuntimeDependencies.inert()
+        var configuration = DemoFixtures.configuration
+        configuration.listening.startOnLaunch = true
+        await dependencies.configStore.save(configuration)
+        await dependencies.configStore.flush()
+        return ListeningController(dependencies: dependencies)
+    }
+
+    @Test("A pause that opens the app is not undone by starting at launch")
+    func coldLaunchPause() async {
+        let controller = await controllerThatStartsAtLaunch()
+        let environment = AppEnvironment(controller: controller, router: WindowRouter())
+        // The link is carried out first, as when it is what launches the app; then the launch's own start-up.
+        await environment.carryOut(.pause)
+        await environment.ensureStartedUp()
+        #expect(controller.state == .off)
+        #expect(controller.configuration.rules.count == 2, "The settings were loaded before the command ran")
+    }
+
+    @Test("Every command that reaches the controller waits for the start-up", arguments: [
+        URLRoute.start, .pause, .toggle, .resume, .snooze(minutes: 30),
+    ])
+    func commandsWaitForTheStartUp(route: URLRoute) async {
+        let controller = await controllerThatStartsAtLaunch()
+        let environment = AppEnvironment(controller: controller, router: WindowRouter())
+        await environment.carryOut(route)
+        #expect(controller.configuration.rules.count == 2, "\(route) ran before the settings were loaded")
+        await controller.pause()  // stops the snooze timer, if there is one
+    }
+
+    @Test("A Snooze button on a notification that opens the app is not undone either")
+    func coldLaunchSnooze() async {
+        let controller = await controllerThatStartsAtLaunch()
+        let environment = AppEnvironment(controller: controller, router: WindowRouter())
+        await environment.handleNotificationAction(NotificationActions.snoozeActionID)
+        await environment.ensureStartedUp()
+        if case .snoozed = controller.state {
+        } else {
+            Issue.record("Expected a snooze, not \(controller.state)")
+        }
+        await controller.pause()  // stops the snooze timer
+    }
+
+    @Test("Links and notification buttons that open a window do not wait for anything")
+    func windowsOpenAtOnce() async {
+        let router = WindowRouter()
+        let environment = AppEnvironment(controller: await controllerThatStartsAtLaunch(), router: router)
+        await environment.carryOut(.openSettings)
+        #expect(router.takePending() == .settings)
+        await environment.carryOut(.openHistory)
+        #expect(router.takePending() == .history)
+        await environment.carryOut(.openLive)
+        #expect(router.takePending() == .live)
+        await environment.handleNotificationAction(NotificationActions.openHistoryActionID)
+        #expect(router.takePending() == .history)
+        await environment.handleNotificationAction("UNKNOWN")
+        #expect(router.takePending() == nil)
+    }
+
+    @Test("Opening the app again shows Settings, or setup until it is done, and never starts setup over")
+    func reopening() async {
+        let finishedRouter = WindowRouter()
+        let finished = AppEnvironment(controller: DemoFixtures.controller(.off), router: finishedRouter)
+        await finished.reopen()
+        #expect(finishedRouter.takePending() == .settings)
+
+        var fresh = AppConfiguration()
+        fresh.hasCompletedOnboarding = false
+        let unfinishedRouter = WindowRouter()
+        let unfinished = AppEnvironment(
+            controller: DemoFixtures.controller(.off, configuration: fresh), router: unfinishedRouter)
+        await unfinished.reopen()
+        #expect(unfinishedRouter.takePending() == .onboarding)
+        #expect(unfinishedRouter.onboardingRequests == 0, "Setup that is open keeps what was typed in it")
+    }
+
+    @Test("The play button before setup is done brings setup forward without starting it over")
+    func playButtonKeepsSetup() {
+        let router = WindowRouter()
+        PopoverHeader.openSetup(on: router)
+        #expect(router.takePending() == .onboarding)
+        #expect(router.onboardingRequests == 0, "What was typed in setup stays")
+    }
+
+    @Test("Each request for setup makes a new setup; the other windows do not")
+    func setupIsNewEachTime() {
+        let router = WindowRouter()
+        #expect(router.onboardingRequests == 0)
+        router.open(.onboarding)
+        #expect(router.onboardingRequests == 1)
+        #expect(router.takePending() == .onboarding)
+        router.open(.history)
+        router.open(.settings)
+        router.open(.live)
+        #expect(router.onboardingRequests == 1)
+        router.open(.onboarding)
+        #expect(router.onboardingRequests == 2)
+        router.open(.onboarding, startsOver: false)
+        #expect(router.onboardingRequests == 2)
+        #expect(router.takePending() == .onboarding)
+        #expect(router.takePending() == nil)
     }
 }
 

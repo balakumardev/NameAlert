@@ -18,6 +18,9 @@ struct LiveTranscriptWindow: View {
     /// window is open.
     @State private var buffer: LiveTranscriptBuffer
     @State private var autoScroll = true
+    /// False from the moment the window closes until it opens again. A window scene keeps its views when its window
+    /// is closed, so the text goes when it closes and nothing collects in it meanwhile.
+    @State private var isOpen = true
 
     /// `initialText` is what the window starts with, for renders; the app starts empty and fills from what is heard.
     init(initialText: String = "") {
@@ -41,7 +44,17 @@ struct LiveTranscriptWindow: View {
         }
         .frame(minWidth: Self.minimumSize.width, minHeight: Self.minimumSize.height)
         .onChange(of: controller.liveTranscript, initial: true) { _, window in
-            buffer.take(window)
+            if isOpen { buffer.take(window) }
+        }
+        .onAppear {
+            // Opened again: start from what is being heard now.
+            guard !isOpen else { return }
+            isOpen = true
+            buffer.take(controller.liveTranscript)
+        }
+        .onDisappear {
+            isOpen = false
+            buffer = LiveTranscriptBuffer()
         }
     }
 

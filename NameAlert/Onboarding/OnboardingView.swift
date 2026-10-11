@@ -18,6 +18,19 @@ struct OnboardingView: View {
     }
 }
 
+/// What the setup window shows. A window scene keeps its views' state when it is closed and opened again, so setup
+/// would come back at the step it was left at, with the old model. Its identity is the router's count of requests for
+/// setup (`WindowRouter.onboardingRequests`) instead: each request makes a new setup that starts at Welcome, from the
+/// settings as they are then.
+struct OnboardingWindowContent: View {
+    @Environment(WindowRouter.self) private var router
+
+    var body: some View {
+        OnboardingView()
+            .id(router.onboardingRequests)
+    }
+}
+
 /// The steps, the dots and the buttons. It makes its model once, from the settings it finds when the window opens.
 private struct OnboardingFlow: View {
     let controller: ListeningController

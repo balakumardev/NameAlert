@@ -32,6 +32,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         Task { await controller.refreshPermissions() }
     }
 
+    /// The app was opened again while it runs. It has no Dock icon to click, so this is how someone who opened it from
+    /// Finder or Spotlight looks for it: Settings, or setup if it is not done. The app handles it, not AppKit.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard AppEnvironment.isLive else { return true }
+        let environment = environment
+        Task { await environment.reopen() }
+        return false
+    }
+
     // MARK: - Links
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -59,8 +68,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         ]
     }
 
-    /// Stops listening and writes the settings and history that are waiting before the app quits; gives up waiting
-    /// after `quitTimeLimit` so a stuck audio device cannot hold the app open.
+    /// Writes the settings and history that are waiting, then stops listening, and quits. The writing comes first
+    /// (`systemWillSleep()` does it before it stops anything), so that a capture source or an engine that hangs while
+    /// it stops cannot keep the files from the disk; it gives up waiting after `quitTimeLimit` so that such a device
+    /// cannot hold the app open either.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard AppEnvironment.isLive else { return .terminateNow }
         // Asked again (say, by logout) while the first request is still being answered: that answer quits the app.
@@ -96,6 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
     ) async {
         let action = response.actionIdentifier
-        await MainActor.run { AppEnvironment.shared.handleNotificationAction(action) }
+        let environment = await AppEnvironment.shared
+        await environment.handleNotificationAction(action)
     }
 }

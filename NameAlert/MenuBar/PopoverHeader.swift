@@ -50,10 +50,16 @@ struct PopoverHeader: View {
     private func toggle() {
         // Before setup is done, starting would ask for permissions out of the blue: finish setup instead.
         if !Self.togglePauses(controller.state), !controller.configuration.hasCompletedOnboarding {
-            router.open(.onboarding)
+            Self.openSetup(on: router)
             return
         }
         Task { await controller.toggle() }
+    }
+
+    /// Brings setup forward as it is, with what was typed in it: pressing play is not asking to start setup over (only
+    /// "Run Setup Again" and a fresh launch do that).
+    static func openSetup(on router: WindowRouter) {
+        router.open(.onboarding, startsOver: false)
     }
 
     /// Whether the button pauses (listening, getting ready, waiting for a call, snoozed) rather than starts, as

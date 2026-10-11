@@ -23,7 +23,7 @@ struct NameAlertApp: App {
         }
 
         Window("Welcome to \(AppInfo.displayName)", id: WindowID.onboarding) {
-            OnboardingView()
+            OnboardingWindowContent()
                 .appEnvironment(environment)
         }
         .windowResizability(.contentSize)  // 600 × 460 and fixed: setup is not a place to resize
