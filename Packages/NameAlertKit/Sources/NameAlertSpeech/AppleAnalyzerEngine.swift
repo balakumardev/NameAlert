@@ -39,8 +39,8 @@ public actor AppleAnalyzerEngine: SpeechEngine {
 
     private typealias Output = AsyncThrowingStream<TranscriptUpdate, any Error>.Continuation
 
-    /// How many converted chunks (100 ms each) wait for the analyzer at most.
-    static let bufferedInputs = 50
+    /// How many converted chunks (100 ms each) wait for the analyzer: 60 s rides out a slow start for at most ~3.8 MB.
+    static let bufferedInputs = 600
 
     private let module: Module
     private let logger = Log.logger("speechanalyzer")
@@ -217,8 +217,8 @@ public actor AppleAnalyzerEngine: SpeechEngine {
     private static func analyze(
         _ audio: AsyncStream<AudioChunk>, with analysis: Analysis, into output: Output, logger: Logger
     ) async throws {
-        // About 5 s of audio waits for an analyzer that falls behind; older chunks are dropped, so that memory stays
-        // bounded, as it does on the way in.
+        // About 60 s of audio waits for an analyzer that starts slowly or falls behind; older chunks are dropped, so
+        // that memory stays bounded, as it does on the way in.
         let (inputs, input) = AsyncStream.makeStream(
             of: AnalyzerInput.self, bufferingPolicy: .bufferingNewest(bufferedInputs))
         do {
