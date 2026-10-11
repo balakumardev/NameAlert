@@ -21,7 +21,9 @@ public struct MatchResult: Sendable, Equatable {
 ///
 /// A rule matches when one of its terms is heard: word by word, or run together or split apart by the
 /// recognizer ("Balakumar" and "Bala Kumar"). How close a heard word must be to the term depends on the
-/// rule's sensitivity. See `Sensitivity.matches(term:heard:)`.
+/// rule's sensitivity. See `Sensitivity.matches(term:heard:)`. Running words together is only tried for a term
+/// of 7 or more characters, whose heard words all have 2 or more, and for spoken initials ("A. J."), so that
+/// "Aman" is not heard in "a man" nor "Justin" in "just in".
 ///
 /// Where readings overlap, the closest one wins: every candidate is scored by its edit distance and they are
 /// chosen lowest distance first, then earliest start, then most heard words, dropping any that overlaps one
@@ -122,6 +124,9 @@ public struct RuleEngine: Sendable {
 private let contextWords = 8
 /// The most heard words that are joined to meet a term written as one word.
 private let maxJoinedWords = 3
+/// How many characters a term has to have, its words joined, to be met by heard words run together or split apart.
+/// Shorter terms would be found inside everyday phrases: "Aman" in "a man", "Isa" in "this is a test".
+private let minCompoundTermLength = 7
 private let maxHints = 100
 private let ellipsis = "\u{2026}"
 
@@ -226,6 +231,20 @@ private final class HeardText {
         joinedLengths[(count - 1) * tokens.count + start]
     }
 
+    /// Whether the `count` words from word `start` may be compared run together with a term of `termLength`
+    /// characters (its words joined): the term must be long enough and every heard word at least two characters, or
+    /// every heard word must be a single character, as when initials are spoken ("A. J.").
+    func mayBeRunTogether(_ count: Int, at start: Int, forTermOfLength termLength: Int) -> Bool {
+        var allSingle = true
+        var allLong = true
+        for position in start..<(start + count) {
+            let wordLength = length(1, at: position)
+            if wordLength != 1 { allSingle = false }
+            if wordLength < 2 { allLong = false }
+        }
+        return allSingle || (allLong && termLength >= minCompoundTermLength)
+    }
+
     /// The `NameKey` of the run, with its vowels folded or kept. Worked out the first time it is asked for.
     func key(_ count: Int, at start: Int, keepVowels: Bool) -> String {
         let slot = (count - 1) * tokens.count + start
@@ -302,6 +321,7 @@ extension CompiledTerm {
         for count in 1...maxJoinedWords where count <= available {
             // One heard word against a one-word term is the comparison made above.
             if count == 1 && words.count == 1 { continue }
+            guard heard.mayBeRunTogether(count, at: start, forTermOfLength: joined.length) else { continue }
             let heardRun = heard.joined(count, at: start)
             let matches = sensitivity.matches(
                 term: joined.text, termLength: joined.length, termKey: { joined.key(keepVowels: $0) },

@@ -9,6 +9,12 @@ private func after(_ seconds: Double) -> Date { t0.addingTimeInterval(seconds) }
 
 private let bala = Rule(name: "My name", terms: ["Bala", "Balakumar"])
 
+/// A short term and an everyday phrase that runs the same letters together, at each sensitivity that could find it.
+private let shortTermRows: [(String, String, Sensitivity)] = [
+    ("Aman", "a man is here"), ("Isa", "this is a test"), ("Justin", "I was just in time"),
+    ("Ajay", "look at a jay bird"),
+].flatMap { term, text in [Sensitivity.exact, .balanced].map { (term, text, $0) } }
+
 private func segment(
     _ id: String, _ text: String, alternatives: [String] = [], isFinal: Bool = false
 ) -> TranscriptUpdate {
@@ -322,6 +328,45 @@ struct RuleEngineTests {
         let result = try #require(results.first)
         #expect(result.matchedText == "bala kumar")
         #expect(result.term == "Bala Kumar")
+    }
+
+    @Test(arguments: shortTermRows)
+    func shortTermsAreNotFoundInEverydayPhrases(term: String, text: String, sensitivity: Sensitivity) {
+        var engine = RuleEngine(rules: [Rule(name: "N", terms: [term], sensitivity: sensitivity)])
+        #expect(engine.hear(segment("s1", text), at: t0).isEmpty, "\(term) in \"\(text)\"")
+    }
+
+    @Test func termsOfSevenCharactersAreJoined() {
+        // Seven characters is the least that joins; one fewer does not.
+        let seven = Rule(name: "N", terms: ["Andrews"], sensitivity: .exact)
+        let six = Rule(name: "N", terms: ["Andrew"], sensitivity: .exact)
+        #expect(RuleEngine.matches(in: "so and rews here", rule: seven).map(\.matchedText) == ["and rews"])
+        #expect(RuleEngine.matches(in: "so and rew here", rule: six).isEmpty)
+    }
+
+    @Test func aTermWrittenAsSeveralWordsIsOnlySplitWhenItsJoinedFormIsLong() {
+        let long = Rule(name: "N", terms: ["Bala Kumar"], sensitivity: .exact)  // "balakumar": 9 characters
+        let short = Rule(name: "N", terms: ["Jo Lee"], sensitivity: .exact)  // "jolee": 5 characters
+        #expect(RuleEngine.matches(in: "hello balakumar", rule: long).map(\.matchedText) == ["balakumar"])
+        #expect(RuleEngine.matches(in: "hello jolee", rule: short).isEmpty)
+        #expect(RuleEngine.matches(in: "hello jo lee", rule: short).map(\.matchedText) == ["jo lee"])
+    }
+
+    @Test func everyHeardWordNeedsTwoCharactersToBeJoined() {
+        // "k" is neither a word of two characters nor one of a run of initials.
+        let rule = Rule(name: "N", terms: ["Balakumar"], sensitivity: .exact)
+        #expect(RuleEngine.matches(in: "so bala k umar here", rule: rule).isEmpty)
+        #expect(RuleEngine.matches(in: "so bala ku mar here", rule: rule).map(\.matchedText) == ["bala ku mar"])
+    }
+
+    @Test(arguments: Sensitivity.allCases)
+    func spokenInitialsAreJoined(sensitivity: Sensitivity) {
+        var engine = RuleEngine(rules: [Rule(name: "N", terms: ["AJ"], sensitivity: sensitivity)])
+        let hits = engine.hear(segment("s1", "ask A. J. now"), at: t0)
+        #expect(hits.count == 1)
+        #expect(hits.first?.matchedText == "A. J")
+        #expect(hits.first?.term == "AJ")
+        #expect(RuleEngine.matches(in: "a j k", rule: Rule(name: "N", terms: ["AJK"], sensitivity: sensitivity)).count == 1)
     }
 
     @Test func matchesDoNotOverlap() {
