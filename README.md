@@ -1,144 +1,100 @@
 # NameAlert
 
-[![Build](https://github.com/balakumardev/NameAlert/actions/workflows/build.yml/badge.svg)](https://github.com/balakumardev/NameAlert/actions/workflows/build.yml)
+NameAlert is a macOS menu-bar app that alerts you the moment someone says your name or keyword during calls, meetings, or videos.
 
-Native macOS 26+ (Tahoe) menu-bar app that continuously transcribes audio on-device using Apple's Speech framework, watches for user-defined keywords, and fires configurable alerts.
-
-Sits in the menu bar — no Dock icon, no window. Pick a keyword (like your name), and get notified whenever it's spoken over system audio or your microphone.
+Speech transcription runs entirely on your Mac, so audio and transcripts stay private. NameAlert is free, requires no account, and includes no analytics or advertisements.
 
 ## Features
 
-- **Two audio sources** — System Audio (Zoom/Teams/YouTube) via ScreenCaptureKit, or Microphone via AVAudioEngine
-- **On-device speech recognition** — uses macOS 26's `SpeechAnalyzer` + `SpeechTranscriber`; nothing leaves your machine
-- **Fuzzy keyword matching** — Damerau–Levenshtein distance for near-miss detection (typos, mumbles, accents)
-- **Per-keyword cooldown** — prevent spam from repeated mentions
-- **Five alert channels:**
-
-| Alert | Description |
-|-------|-------------|
-| System Beep | Plays any macOS system sound (Glass, Ping, Submarine, etc.) |
-| macOS Notification | Standard notification center banner |
-| Persistent Alert | Looping sound + modal dialog that must be dismissed |
-| ntfy.sh Push | Push notification to any device via ntfy.sh |
-| CallMeBot Telegram | Free Telegram voice call via CallMeBot TTS |
-
-- **Launch at login** via `SMAppService`
-- **Global cooldown** — suppress all alerts for N seconds after a match
-- **Test buttons** in Settings to verify each alert channel
+- **Keyword rules**: Add custom keywords and phrases with spelling or nickname variants (such as "Bala, Balakumar, BK").
+- **Sensitivity controls**: Choose Exact, Balanced, or Loose matching per rule. Balanced catches small pronunciation variations while ignoring similar everyday words.
+- **Multiple alert channels**:
+  - System sound alert.
+  - macOS notification with Snooze and Open History actions.
+  - Persistent alarm that continues ringing until dismissed.
+  - Visual screen flash.
+  - Push notification to your phone via ntfy.
+  - Phone call to your phone via Telegram using CallMeBot.
+  - Signed JSON webhook for Slack, Home Assistant, Zapier, or n8n.
+- **Transcript context**: Each alert includes the last ~30 seconds of transcript so you know what was asked.
+- **Listening modes**: Listen continuously, or listen only when on an active call by detecting when another app accesses the microphone.
+- **Snooze**: Snooze alerts for 15 minutes, 1 hour, or until tomorrow.
+- **Searchable history**: Review past mentions locally on your Mac, or turn off history recording entirely.
+- **Live transcript window**: View speech recognition output in real time.
+- **Shortcuts and Siri**: Actions to start, pause, toggle, snooze, add keywords, and view recent mentions.
+- **URL scheme**: Control the app using `namealert://` commands: `start`, `pause`, `toggle`, `resume`, `snooze?minutes=30`, `open/settings`, `open/history`, and `open/live`.
 
 ## Requirements
 
-- macOS 26.0+ (Tahoe)
-- Xcode 16+
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
+- macOS 14 Sonoma or later.
+- Apple silicon or Intel processor.
+- System permissions:
+  - **Screen & System Audio Recording**: Required to capture audio from calls and media via ScreenCaptureKit. NameAlert never captures or stores screen video.
+  - **Microphone**: Optional, for listening to people speaking in the room.
+  - **Speech Recognition**: Required only on older macOS versions that rely on Apple's older speech recognizer.
+  - **Notifications**: Optional, to display banner alerts.
 
-### Permissions
+## Installation
 
-| Source | Permission Required |
-|--------|-------------------|
-| System Audio | Screen & System Audio Recording (TCC) |
-| Microphone | Microphone + Speech Recognition |
+- Install from the [Mac App Store](#app-store).
+- Or download the notarized DMG from [GitHub Releases](https://github.com/balakumardev/NameAlert/releases/latest).
 
-After granting Screen Recording, you must **quit and relaunch** the app for the permission to take effect.
+## Privacy
 
-### Permission Persistence
+- Audio and transcripts never leave your Mac.
+- Transcription uses on-device speech recognition, or a small downloadable local model on Macs without it.
+- No user accounts, no tracking, and no analytics.
+- External connections occur only if you configure an optional alert service (ntfy, CallMeBot, or custom webhook).
+- Secrets and tokens are saved in the macOS Keychain.
 
-TCC permissions (Screen Recording, Microphone, Speech Recognition) are stored in macOS's TCC database and **persist across restarts** — you only grant them once per app build.
+## Building from Source
 
-However, because CI builds are not signed with an Apple Developer certificate, each new DMG build gets a different ad-hoc code signature. This means macOS may re-prompt for permissions after you update to a new build. To avoid this:
-
-- **Use a single DMG build** for as long as possible before upgrading
-- **Or sign locally** with your own development certificate: open `NameAlert.xcodeproj` in Xcode, set your team under Signing & Capabilities, and build from Xcode — permissions will then survive across local rebuilds
-
-## Install
-
-Download the latest DMG from the [GitHub Actions page](https://github.com/balakumardev/NameAlert/actions?query=workflow%3ABuild+branch%3Amain) (click the latest run, then download `NameAlert.dmg` under Artifacts).
-
-### Opening an Unsigned App
-
-Since NameAlert is not signed with an Apple Developer certificate, Gatekeeper will block it the first time. To open it anyway:
-
-1. **Ctrl+click** (or right-click) **NameAlert.app** → **Open**
-2. Click **Open** in the dialog
-
-This registers a Gatekeeper exception for that specific build. You only need to do this once per DMG download.
-
-> On Apple Silicon (M-series), you may also need to browse to the app in Finder, Ctrl+click → Open to get past the "cannot be opened because the developer cannot be verified" warning.
-
-## Build & Run
-
-### Local Development
+Prerequisites:
+- Xcode 15 or later.
+- XcodeGen.
 
 ```bash
-# Generate Xcode project
+# Install XcodeGen
+brew install xcodegen
+
+# Generate the Xcode project
 xcodegen generate
 
-# Build and run from Xcode, or use the command line:
-xcodebuild -project NameAlert.xcodeproj -scheme NameAlert -configuration Debug \
-  -destination 'platform=macOS' build
+# Build the app
+xcodebuild -scheme NameAlert
+
+# Or open in Xcode
+open NameAlert.xcodeproj
 
 # Run tests
-xcodebuild -project NameAlert.xcodeproj -scheme NameAlert \
-  -destination 'platform=macOS' test
-
-# Launch the built app
-open ~/Library/Developer/Xcode/DerivedData/NameAlert-*/Build/Products/Debug/NameAlert.app
-```
-
-### CI Build (GitHub Actions)
-
-Every push to `main` and every pull request triggers an automated build and packages a DMG. See the workflow at `.github/workflows/build.yml`.
-
-```bash
-# Generate Xcode project
-xcodegen generate
-
-# Build
-xcodebuild -project NameAlert.xcodeproj -scheme NameAlert -configuration Debug \
-  -destination 'platform=macOS' build
-
-# Test
-xcodebuild -project NameAlert.xcodeproj -scheme NameAlert \
-  -destination 'platform=macOS' test
-
-# Launch
-open ~/Library/Developer/Xcode/DerivedData/NameAlert-*/Build/Products/Debug/NameAlert.app
+swift test --package-path Packages/NameAlertKit
 ```
 
 ## Project Structure
 
-```
-NameAlert.xcodeproj/       — Generated by XcodeGen (do not edit directly)
-project.yml                — XcodeGen project spec (source of truth)
-NameAlert/
-├── NameAlertApp.swift             — MenuBarExtra + Settings + lifecycle
-├── Menu/
-│   └── MenuBarContent.swift       — Status item, listening toggle, recent hits
-├── Core/
-│   ├── ListeningEngine.swift      — Wires transcription → matching → alerts
-│   ├── TranscriptionService.swift — SpeechAnalyzer/Transcriber actor (mic + system audio)
-│   ├── SystemAudioCapture.swift   — SCStream actor for system audio capture
-│   ├── KeywordMatcher.swift       — Rolling token window + fuzzy matching
-│   ├── Hit.swift                  — Match result value type
-│   └── AlertCoordinator.swift     — Parallel alert dispatch with cooldown
-├── Alerts/
-│   ├── Alert.swift                — Alert protocol
-│   ├── BeepAlert.swift            — System sound
-│   ├── NotificationAlert.swift    — macOS Notification Center
-│   ├── PersistentAlert.swift      — Looping sound + modal dialog
-│   ├── NtfyAlert.swift            — ntfy.sh push
-│   └── CallMeBotAlert.swift       — Telegram voice call
-├── Settings/
-│   ├── AppSettings.swift          — @AppStorage-backed model
-│   ├── SettingsView.swift         — Tabbed settings window
-│   ├── KeywordsTab.swift          — Keyword list management
-│   └── AlertsTab.swift            — Alert channel toggles & config
-└── Info.plist
-NameAlertTests/
-├── KeywordMatcherTests.swift
-└── AlertCoordinatorTests.swift
-```
+- `NameAlert/`: App shell including menu bar items, onboarding flow, settings windows, and App Intents.
+- `Packages/NameAlertKit/`: Modular package containing core functionality:
+  - `NameAlertCore`: Configuration, rule definition, matching logic, and mention history.
+  - `NameAlertAudio`: Audio stream capture, mixing, and microphone call detection.
+  - `NameAlertSpeech`: Speech recognition engines (Apple Speech frameworks and whisper.cpp engine) and model downloads.
+  - `NameAlertAlerts`: Alert dispatch channels (sound, notification, alarm, flash, ntfy, CallMeBot, webhook).
+  - `NameAlertRuntime`: Central listening and coordination controller.
+- `scripts/`: Packaging and release scripts.
+- `appstore/`: App Store Connect metadata and review notes.
+- `site/`: Static website and documentation.
+
+## CI Overview
+
+- `ci.yml`: Runs automated tests on every push.
+- `appstore.yml`: Uploads builds to App Store Connect from `main` and submits for review on `v*` tags.
+- `release.yml`: Builds, notarizes, and publishes DMG releases on `v*` tags.
+- `pages.yml`: Deploys the static site to GitHub Pages.
+
+## Acknowledgements
+
+- [whisper.cpp](https://github.com/ggerganov/whisper.cpp) (MIT License)
+- SCOWL word lists
 
 ## License
 
-MIT
+This project is licensed under the MIT License.

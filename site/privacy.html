@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy - NameAlert</title>
+  <meta name="description" content="Privacy Policy for NameAlert. All speech recognition and audio processing happen on your Mac.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <div class="container nav-container">
+      <a href="index.html" class="logo">NameAlert</a>
+      <nav aria-label="Main Navigation">
+        <ul>
+          <li><a href="index.html">Home</a></li>
+          <li><a href="support.html">Support</a></li>
+          <li><a href="privacy.html" class="active">Privacy</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="container">
+      <h1>Privacy Policy</h1>
+      <p class="effective-date">Effective date: 2026-10-11</p>
+
+      <div class="policy-content">
+        <section class="policy-block">
+          <h3>On-Device Audio and Speech Processing</h3>
+          <p>NameAlert processes all audio and speech transcription directly on your Mac. Audio streams from your microphone or system audio are analyzed in memory and are never transmitted to external servers, cloud providers, or the developer.</p>
+        </section>
+
+        <section class="policy-block">
+          <h3>Data Sent to External Services</h3>
+          <p>The only data that leaves your Mac is an alert that you explicitly set up yourself. If you enable any of the following optional alert channels, NameAlert sends the alert notification directly to that service:</p>
+          <ul>
+            <li><strong>ntfy:</strong> Sends a notification payload to your chosen ntfy topic server.</li>
+            <li><strong>CallMeBot:</strong> Sends a request to trigger a Telegram voice call to your phone.</li>
+            <li><strong>Custom Webhook:</strong> Sends a signed JSON payload containing the match details and transcript context to the URL you specify (such as Slack, Home Assistant, Zapier, or n8n).</li>
+          </ul>
+          <p>CoolSolve LLP does not operate proxy servers, collect these payloads, or have access to your alert data.</p>
+        </section>
+
+        <section class="policy-block">
+          <h3>No Accounts, No Tracking, No Analytics</h3>
+          <p>NameAlert requires no account or registration. The app contains no third-party tracking frameworks, no analytics SDKs, and no advertising code. We collect no telemetry about your device or usage.</p>
+        </section>
+
+        <section class="policy-block">
+          <h3>Local History Storage</h3>
+          <p>NameAlert can maintain a local history of detected mentions and surrounding transcript snippets so you can review what was said. This history is stored strictly on your Mac in application storage. You can search your history, turn off history recording entirely, or delete all records at any time from Settings.</p>
+        </section>
+
+        <section class="policy-block">
+          <h3>Secure Credential Storage</h3>
+          <p>Any tokens or secrets you provide for optional webhook verification or third-party notification services are stored securely in your macOS Keychain.</p>
+        </section>
+
+        <section class="policy-block">
+          <h3>Contact</h3>
+          <p>If you have questions about this privacy policy, please contact CoolSolve LLP by email at <a href="mailto:mail@balakumar.dev">mail@balakumar.dev</a>.</p>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <div class="container footer-content">
+      <span>&copy; 2026 CoolSolve LLP</span>
+      <a href="https://github.com/balakumardev/NameAlert">GitHub</a>
+    </div>
+  </footer>
+</body>
+</html>
