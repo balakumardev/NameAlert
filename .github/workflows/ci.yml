@@ -2,10 +2,12 @@ name: CI
 
 # Builds and tests NameAlert on GitHub-hosted runners. No secrets here, so it is safe on pull requests.
 #
-#   macos-26   swift test, then an unsigned universal Release build that must produce no warnings
-#              in NameAlert/ or Packages/
-#   macos-15   swift test only, so the code paths for older macOS versions run too. If that image has no
-#              Xcode 26 or later, the leg ends early and the job still passes.
+#   macos-26        swift test, then an unsigned universal Release build that must produce no warnings
+#                   in NameAlert/ or Packages/
+#   macos-15        swift test only, so the code paths for older macOS versions run too. If that image has no
+#                   Xcode 26 or later, the leg ends early and the job still passes.
+#   macos-26-intel  An x86_64 Mac, the only place the Intel slice of whisper.cpp runs: swift test, then the
+#                   whisper tests on the real Light model (NAMEALERT_INTEGRATION=1, models cached).
 
 on:
   pull_request:
@@ -36,9 +38,15 @@ jobs:
           - os: macos-26
             full: true
             optional: false
+            whisper: false
           - os: macos-15
             full: false
             optional: true
+            whisper: false
+          - os: macos-26-intel
+            full: false
+            optional: false
+            whisper: true
     steps:
       - name: Select the newest Xcode (26 or later)
         id: xcode
@@ -100,6 +108,24 @@ jobs:
       - name: Run the package tests
         if: steps.xcode.outputs.skip != 'true'
         run: swift test --package-path Packages/NameAlertKit
+
+      - name: Cache the whisper models
+        if: steps.xcode.outputs.skip != 'true' && matrix.whisper
+        uses: actions/cache@v4
+        with:
+          # Where the whisper tests keep the models they download (the system cache folder, in
+          # NameAlertTests/Models). The catalog holds every model's URL and checksum, so a change there
+          # starts a new cache.
+          path: ~/Library/Caches/NameAlertTests/Models
+          key: ${{ runner.os }}-${{ runner.arch }}-whisper-models-${{ hashFiles('Packages/NameAlertKit/Sources/NameAlertSpeech/ModelCatalog.swift') }}
+
+      - name: Run the whisper tests on the real models
+        if: steps.xcode.outputs.skip != 'true' && matrix.whisper
+        env:
+          NAMEALERT_INTEGRATION: '1'
+        # WhisperEngineTests only. The other opt-in tests need permissions or hardware that a runner does not have,
+        # and the performance test is for scripts/verify.sh.
+        run: swift test --package-path Packages/NameAlertKit --filter WhisperEngineTests
 
       - name: Install XcodeGen
         if: steps.xcode.outputs.skip != 'true' && matrix.full
