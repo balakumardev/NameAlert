@@ -32,8 +32,9 @@ public protocol SpeechEngine: Sendable {
     /// Which recognizer this is. It goes into every hit.
     var id: EngineID { get }
 
-    /// Gets the engine ready for a language: asks for any permission it needs, downloads or installs what is
-    /// missing, and loads it. `hints` are the names to listen for. `progress` can be called from any thread.
+    /// Gets the engine ready for a language: checks any permission it needs (asking for it is the caller's job),
+    /// downloads or installs what is missing, and loads it. `hints` are the names to listen for. `progress` can be
+    /// called from any thread.
     func prepare(
         localeIdentifier: String, hints: [String],
         progress: @escaping @Sendable (PreparationProgress) -> Void
