@@ -260,9 +260,10 @@ extension EnvironmentValues {
 }
 
 /// A scroll view that is as tall as its content, up to `maxHeight`, and scrolls beyond that. It starts at the end of
-/// the content.
+/// the content (the words of a mention end with the match), or at the top with `startsAtEnd: false`.
 struct CappedScrollView<Content: View>: View {
     let maxHeight: CGFloat
+    var startsAtEnd = true
     @ViewBuilder let content: Content
 
     @State private var contentHeight: CGFloat?
@@ -272,7 +273,7 @@ struct CappedScrollView<Content: View>: View {
             content
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
         }
-        .defaultScrollAnchor(.bottom)  // a mention's text ends with the match: its words come first
+        .defaultScrollAnchor(startsAtEnd ? .bottom : .top)
         .scrollBounceBehavior(.basedOnSize)
         .frame(height: min(contentHeight ?? maxHeight, maxHeight))
     }

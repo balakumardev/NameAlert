@@ -12,6 +12,8 @@ struct TermChipsField: View {
     let add: ([String]) -> Void
     /// Called with the word whose remove button was pressed.
     let remove: (String) -> Void
+    /// What the field says while there are no words yet.
+    var emptyPrompt = "Add a name or phrase"
 
     @State private var draft = ""
 
@@ -20,21 +22,29 @@ struct TermChipsField: View {
             ForEach(Array(terms.enumerated()), id: \.offset) { _, term in
                 TermChip(term: term) { remove(term) }
             }
-            TextField(
-                "Words", text: $draft,
-                prompt: Text(terms.isEmpty ? "Add a name or phrase" : "Add another").foregroundStyle(.secondary)
-            )
-            .textFieldStyle(.plain)
-            .labelsHidden()
-            .multilineTextAlignment(.leading)
-            .focused(focus)
-            .frame(minWidth: 150)
-            .onSubmit { commit() }
-            .onChange(of: draft) { _, text in splitAtCommas(text) }
-            .onChange(of: focus.wrappedValue) { _, isFocused in
-                if !isFocused { commit() }
+            // The hint is drawn here, not as the field's prompt: a plain field may draw its prompt in the text color,
+            // which reads as something typed.
+            ZStack(alignment: .leading) {
+                TextField("Words", text: $draft, prompt: Text(verbatim: ""))
+                    .textFieldStyle(.plain)
+                    .labelsHidden()
+                    .multilineTextAlignment(.leading)
+                    .focused(focus)
+                    .onSubmit { commit() }
+                    .onChange(of: draft) { _, text in splitAtCommas(text) }
+                    .onChange(of: focus.wrappedValue) { _, isFocused in
+                        if !isFocused { commit() }
+                    }
+                    .accessibilityLabel("Add a name or phrase")
+                if draft.isEmpty {
+                    Text(verbatim: terms.isEmpty ? emptyPrompt : "Add another")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
             }
-            .accessibilityLabel("Add a name or phrase")
+            .frame(minWidth: 150)
         }
         .padding(6)
         .frame(maxWidth: .infinity, alignment: .leading)

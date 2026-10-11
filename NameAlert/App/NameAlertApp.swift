@@ -26,6 +26,7 @@ struct NameAlertApp: App {
             OnboardingView()
                 .appEnvironment(environment)
         }
+        .windowResizability(.contentSize)  // 600 × 460 and fixed: setup is not a place to resize
 
         Window("History", id: WindowID.history) {
             HistoryWindow()
