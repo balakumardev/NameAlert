@@ -79,13 +79,20 @@ struct CallDetectionTests {
         #expect(logic.update(processes: processes, now: t0) == .active(["us.zoom.xos", "pid:55"]))
     }
 
-    @Test func theIgnoredDaemonsAreExactlyTheTenInTheSpec() {
+    @Test func theIgnoredDaemonsMatchTheSpec() {
         #expect(
             CallDetectionLogic.ignoredBundleIDs == [
                 "com.apple.corespeechd", "com.apple.CoreSpeech", "com.apple.speech.recognitionserver",
                 "com.apple.SpeechRecognitionCore", "com.apple.assistantd", "com.apple.Siri", "com.apple.VoiceOver",
                 "com.apple.voicebankingd", "com.apple.accessibility.heard", "com.apple.audioaccessoryd",
+                "com.apple.replayd",
             ])
+    }
+
+    /// The system's screen-recording daemon records for other apps and is never a call itself.
+    @Test func theScreenRecordingDaemonIsIgnored() {
+        var logic = makeLogic()
+        #expect(logic.update(processes: [recording(302, "com.apple.replayd")], now: t0) == .inactive)
     }
 
     // MARK: Browsers

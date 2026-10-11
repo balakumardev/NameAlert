@@ -41,11 +41,13 @@ public struct AudioProcessSnapshot: Sendable, Equatable {
 /// muted call lets go of the microphone, or hands it from one process to another, does not end it. The call is over
 /// exactly `grace` after the last time it was seen.
 public struct CallDetectionLogic: Sendable {
-    /// System processes that listen all day (speech recognition, Siri, accessibility). They are never a call.
+    /// System processes that listen all day (speech recognition, Siri, accessibility) or record for other apps
+    /// (`com.apple.replayd`, the screen-recording daemon). They are never a call.
     public static let ignoredBundleIDs: Set<String> = [
         "com.apple.corespeechd", "com.apple.CoreSpeech", "com.apple.speech.recognitionserver",
         "com.apple.SpeechRecognitionCore", "com.apple.assistantd", "com.apple.Siri", "com.apple.VoiceOver",
         "com.apple.voicebankingd", "com.apple.accessibility.heard", "com.apple.audioaccessoryd",
+        "com.apple.replayd",
     ]
 
     /// Safari and WebKit, Chrome, Firefox, Edge, Brave, Arc, Opera and Vivaldi. A bundle ID that starts with one of
