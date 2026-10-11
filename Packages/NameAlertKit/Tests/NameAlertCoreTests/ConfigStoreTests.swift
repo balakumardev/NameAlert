@@ -288,7 +288,7 @@ struct ConfigStoreTests {
             try original.write(to: file)
 
             // The rule would decode fine, but a newer app wrote this file: it is set aside, not half-read.
-            let loaded = await ConfigStore(fileURL: file, debounce: neverWithinATest).load()
+            let loaded = await ConfigStore(fileURL: file).load()
             #expect(loaded == AppConfiguration())
 
             let found = try backups(in: directory)
@@ -305,7 +305,7 @@ struct ConfigStoreTests {
         try await inTemporaryDirectory { directory in
             let file = directory.appendingPathComponent("config.json")
             try Data(#"{"schemaVersion":\#(version)}"#.utf8).write(to: file)
-            let loaded = await ConfigStore(fileURL: file, debounce: neverWithinATest).load()
+            let loaded = await ConfigStore(fileURL: file).load()
             #expect(loaded == AppConfiguration())
             #expect(try backups(in: directory).count == 1)
         }
@@ -353,7 +353,8 @@ struct ConfigStoreTests {
 
     // A backup leaves config.json as it was, or takes it away. Without a write after it, every launch would find the
     // same file again and keep one more backup of it. So `load()` follows a backup with a normal, debounced save of
-    // the configuration it returns.
+    // the configuration it returns. The exception is a file from a newer version of the app: it is kept, but it stays
+    // where it is, so that going back to that version finds it unharmed.
 
     @Test func backupIsFollowedByOneNormalizingSave() async throws {
         try await inTemporaryDirectory { directory in
@@ -384,11 +385,10 @@ struct ConfigStoreTests {
     }
 
     @Test(arguments: [
-        #"{"schemaVersion":2,"rules":[{"name":"keep","terms":["k"]}]}"#,  // written by a newer version
         #"{"rules":[{"name":"keep","terms":["k"]},{"name":"broken"}]}"#,  // a rule that cannot be read
         #"{"rules":"oops","listening":{"source":"microphone"}}"#,  // rules that are not a list
     ])
-    func everyKindOfBackupIsFollowedByANormalizingSave(json: String) async throws {
+    func aFileThatLostRulesIsFollowedByANormalizingSave(json: String) async throws {
         try await inTemporaryDirectory { directory in
             let file = directory.appendingPathComponent("config.json")
             try Data(json.utf8).write(to: file)
@@ -425,6 +425,28 @@ struct ConfigStoreTests {
             let relaunched = await ConfigStore(fileURL: file).load()
             #expect(relaunched == loaded)
             #expect(try backups(in: directory).count == 1)
+        }
+    }
+
+    @Test func newerSchemaIsNotOverwrittenByLoad() async throws {
+        try await inTemporaryDirectory { directory in
+            let file = directory.appendingPathComponent("config.json")
+            let original = Data(#"{"schemaVersion":2,"rules":[{"name":"keep","terms":["k"]}]}"#.utf8)
+            try original.write(to: file)
+
+            // A short debounce, so that a save scheduled by load() would long since have been written.
+            let store = ConfigStore(fileURL: file, debounce: .milliseconds(10))
+            let loaded = await store.load()
+            #expect(loaded == AppConfiguration())
+            try await Task.sleep(for: .milliseconds(100))
+            await store.flush()
+
+            // The newer version's file stays where it is, byte for byte. The copy is still made.
+            #expect(try Data(contentsOf: file) == original)
+            let found = try backups(in: directory)
+            #expect(found.count == 1)
+            let backup = try #require(found.first)
+            #expect(try Data(contentsOf: backup) == original)
         }
     }
 

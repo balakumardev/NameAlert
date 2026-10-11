@@ -13,8 +13,11 @@ import os
 /// copy of; `save` still takes the values and keeps the latest in memory.
 ///
 /// Once a file has been kept, `load()` schedules an ordinary save of the configuration it returns. Otherwise
-/// `config.json` would stay the file that needed a backup, and every launch would keep another copy of it. Call
-/// `load()` once at startup, before the first `save`.
+/// `config.json` would stay the file that needed a backup, and every launch would keep another copy of it. A file
+/// from a newer version of the app is the exception: it is kept, but it stays where it is and `load()` saves nothing
+/// over it, so that going back to the newer version finds it unharmed. (A save the user's own changes lead to still
+/// replaces it, and each launch of this version keeps another copy of it.) Call `load()` once at startup, before the
+/// first `save`.
 ///
 /// Writing is debounced and atomic. `save` keeps only the latest value and writes it once, `debounce` after the
 /// first save of a burst; `flush()` writes right away. A failed write is logged, never fatal, and the value stays
@@ -49,7 +52,7 @@ public actor ConfigStore {
     /// as well (see the type comment).
     ///
     /// Whenever a file was kept, the configuration returned is also scheduled to be saved, like any other `save`,
-    /// unless writes are suspended.
+    /// unless writes are suspended or the file came from a newer version of the app.
     ///
     /// This is always the file as it is on disk: a `save` that has not been written yet is not included.
     public func load() -> AppConfiguration {
@@ -67,7 +70,12 @@ public actor ConfigStore {
             // Ask for the version alone first: a newer file must not be half-read with today's model.
             if let version = try decoder.decode(SchemaProbe.self, from: data).schemaVersion,
                version > AppConfiguration.currentSchemaVersion {
-                return setAside(because: "was written by a newer version of NameAlert (schema \(version))")
+                // Kept like any unusable file, but not followed by a save: the newer version wrote this file and will
+                // want it back, and a save from this one would replace it with today's model.
+                keepFile(
+                    because: "was written by a newer version of NameAlert (schema \(version))",
+                    andStartFrom: "defaults")
+                return AppConfiguration()
             }
             let configuration = try decoder.decode(AppConfiguration.self, from: data)
             if let lost = Self.describeLostRules(in: data, decoded: configuration, decoder: decoder) {
