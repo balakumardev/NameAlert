@@ -45,6 +45,18 @@ struct CallDetectionTests {
         #expect(logic.update(processes: processes, now: t0) == .inactive)
     }
 
+    /// Core Audio reports a bundle ID in whatever case the app spells it, so IDs are compared without regard to case.
+    @Test func ownBundleIDMatchesWithoutRegardToCase() {
+        var logic = makeLogic()
+        #expect(logic.update(processes: [recording(300, ownBundleID.uppercased())], now: t0) == .inactive)
+    }
+
+    @Test(arguments: ["COM.APPLE.CORESPEECHD", "com.apple.siri", "Com.Apple.VoiceOver"])
+    func ignoredDaemonsMatchWithoutRegardToCase(bundleID: String) {
+        var logic = makeLogic()
+        #expect(logic.update(processes: [recording(301, bundleID)], now: t0) == .inactive)
+    }
+
     @Test func onlyProcessesThatAreRecordingCount() {
         var logic = makeLogic()
         let playingOnly = [AudioProcessSnapshot(pid: 200, bundleID: "us.zoom.xos", isRunningInput: false)]
@@ -90,6 +102,17 @@ struct CallDetectionTests {
     /// Safari records in WebKit's own helper processes, not under `com.apple.Safari`.
     @Test(arguments: ["com.apple.WebKit.GPU", "com.apple.WebKit.WebContent"])
     func webKitHelpersNeedTheBrowserDelay(bundleID: String) {
+        var logic = makeLogic()
+        let helper = [recording(500, bundleID)]
+        #expect(logic.update(processes: helper, now: t0) == .inactive)
+        #expect(logic.update(processes: helper, now: after(2)) == .inactive)
+        #expect(logic.update(processes: helper, now: after(3)) == .active([bundleID]))
+    }
+
+    /// Arc's helper processes spell the name in lower case (`company.thebrowser.browser.helper`), unlike the app's own
+    /// `company.thebrowser.Browser`, so the prefixes match without regard to case.
+    @Test(arguments: ["company.thebrowser.browser.helper", "COM.GOOGLE.CHROME.HELPER"])
+    func browserHelpersNeedTheDelayWhateverTheirCase(bundleID: String) {
         var logic = makeLogic()
         let helper = [recording(500, bundleID)]
         #expect(logic.update(processes: helper, now: t0) == .inactive)

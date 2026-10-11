@@ -29,7 +29,10 @@ public struct AudioProcessSnapshot: Sendable, Equatable {
 ///
 /// A process counts while it is recording, unless it is NameAlert itself (by process ID or bundle ID) or one of the
 /// system's own listeners that record all day (`ignoredBundleIDs`). Apps are told apart by bundle ID, so the many
-/// helper processes of one app are one entry; a process without a bundle ID is `pid:<n>`.
+/// helper processes of one app are one entry; a process without a bundle ID is `pid:<n>`. Bundle IDs are compared
+/// without regard to case, because Core Audio hands them over as the app spells them (Arc's helpers are
+/// `company.thebrowser.browser.helper`, its app `company.thebrowser.Browser`); the sets that are reported keep the
+/// case as it came.
 ///
 /// A browser counts only after it has been recording for `browserDelay` without a break: a page that grabs the
 /// microphone for a second (a voice search, a dictation button) is not a call. Everything else counts at once.
@@ -54,13 +57,17 @@ public struct CallDetectionLogic: Sendable {
         "com.vivaldi.Vivaldi",
     ]
 
+    /// The two lists above in lower case, which is what bundle IDs are compared with. Made once.
+    private static let ignoredLowercased = Set(ignoredBundleIDs.map { $0.lowercased() })
+    private static let browserPrefixesLowercased = browserBundleIDPrefixes.map { $0.lowercased() }
+
     private struct Sighting: Sendable {
         var time: Date
         var apps: Set<String>
     }
 
     private let ownPID: Int32
-    private let ownBundleID: String
+    private let ownBundleIDLowercased: String
     private let browserDelay: TimeInterval
     private let grace: TimeInterval
     /// Since when each browser that is recording now has been, by bundle ID. A browser that let go is not here.
@@ -75,7 +82,7 @@ public struct CallDetectionLogic: Sendable {
     ///   - grace: How long, in seconds, the call lasts after the last time anything counted.
     public init(ownPID: Int32, ownBundleID: String, browserDelay: TimeInterval = 3, grace: TimeInterval = 8) {
         self.ownPID = ownPID
-        self.ownBundleID = ownBundleID
+        self.ownBundleIDLowercased = ownBundleID.lowercased()
         self.browserDelay = browserDelay
         self.grace = grace
     }
@@ -93,8 +100,9 @@ public struct CallDetectionLogic: Sendable {
                 counting.insert("pid:\(process.pid)")
                 continue
             }
-            if bundleID == ownBundleID || Self.ignoredBundleIDs.contains(bundleID) { continue }
-            guard Self.isBrowser(bundleID) else {
+            let lowercased = bundleID.lowercased()
+            if lowercased == ownBundleIDLowercased || Self.ignoredLowercased.contains(lowercased) { continue }
+            guard Self.isBrowser(lowercased) else {
                 counting.insert(bundleID)
                 continue
             }
@@ -120,7 +128,8 @@ public struct CallDetectionLogic: Sendable {
         return .inactive
     }
 
-    private static func isBrowser(_ bundleID: String) -> Bool {
-        browserBundleIDPrefixes.contains { bundleID.hasPrefix($0) }
+    /// Whether a bundle ID, already in lower case, starts with the ID of a browser.
+    private static func isBrowser(_ lowercasedBundleID: String) -> Bool {
+        browserPrefixesLowercased.contains { lowercasedBundleID.hasPrefix($0) }
     }
 }
