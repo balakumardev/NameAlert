@@ -80,7 +80,8 @@ targets:
         COMBINE_HIDPI_IMAGES: YES
 
   # Hosts the render and screenshot tests: the app's views and logic without its @main, Info.plist or entitlements,
-  # so it never listens, is not sandboxed (renders are written into the repository) and claims no URL scheme.
+  # so it never listens, is not sandboxed (renders are written into the repository), claims no URL scheme and
+  # registers no App Intents or Shortcuts.
   ScreenshotHost:
     type: application
     platform: macOS
@@ -90,6 +91,7 @@ targets:
           - "Info.plist"
           - "NameAlert.entitlements"
           - "App/NameAlertApp.swift"
+          - "Intents"
       - path: ScreenshotHost
     dependencies:
       - package: NameAlertKit
