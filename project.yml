@@ -58,6 +58,8 @@ targets:
         NSMicrophoneUsageDescription: "NameAlert listens to your microphone on this Mac to notice when someone says your name."
         NSSpeechRecognitionUsageDescription: "NameAlert turns speech into text on this Mac so it can spot your name and keywords."
         NSScreenCaptureUsageDescription: "NameAlert listens to audio from calls and videos on this Mac to notice when someone says your name."
+        # Shown when an alert goes to a server on the user's own network (a self-hosted ntfy or webhook).
+        NSLocalNetworkUsageDescription: "NameAlert sends alerts to a server on your local network, like a self-hosted ntfy or webhook, when you set one up."
         # Plain http is accepted only for alert servers on the user's own network (ChannelSettings.isLocalNetworkHost);
         # this is what lets those requests through App Transport Security. Everything else must be https.
         NSAppTransportSecurity:
