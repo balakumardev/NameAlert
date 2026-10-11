@@ -9,6 +9,29 @@ enum DemoFixtures {
     static let nameRule = Rule(name: "My name", terms: ["Bala"])
     static let standupRule = Rule(name: "Standup", terms: ["standup"])
 
+    /// Three rules that fill the Rules settings: the usual one for a name, one on exact matching with a longer
+    /// cooldown, and one that is switched off.
+    static var settingsRules: [Rule] {
+        [
+            Rule(
+                name: "My name", terms: ["Bala", "Balakumar", "Bala Kumar"], sensitivity: .balanced,
+                channels: [.sound, .notification], cooldownSeconds: 10),
+            Rule(
+                name: "Standup", terms: ["standup", "stand-up"], sensitivity: .exact,
+                channels: [.sound, .persistentAlarm], cooldownSeconds: 45),
+            Rule(
+                name: "Project Atlas", terms: ["Atlas"], sensitivity: .loose, channels: [.notification],
+                cooldownSeconds: 120, isEnabled: false),
+        ]
+    }
+
+    /// A configuration with `settingsRules`, for the Settings renders.
+    static var settingsConfiguration: AppConfiguration {
+        var configuration = Self.configuration
+        configuration.rules = settingsRules
+        return configuration
+    }
+
     static var configuration: AppConfiguration {
         var configuration = AppConfiguration()
         configuration.hasCompletedOnboarding = true
