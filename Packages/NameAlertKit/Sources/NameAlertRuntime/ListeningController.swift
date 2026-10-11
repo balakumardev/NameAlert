@@ -52,7 +52,8 @@ public final class ListeningController {
 
     public private(set) var configuration: AppConfiguration
     public private(set) var state: ListeningState = .off
-    /// The audio level while listening, from 0 to 1, at most 15 times a second; 0 otherwise.
+    /// The audio level while listening, from 0 (−60 dBFS or quieter) to 1 (full scale), at most 15 times a second; 0
+    /// otherwise.
     public private(set) var level: Double = 0
     /// The last 300 characters heard: the final text, then what the engine is still working on. Kept in memory only.
     public private(set) var liveTranscript = ""
@@ -109,9 +110,16 @@ public final class ListeningController {
     @ObservationIgnored private var deliveries: [UInt64: Task<Void, Never>] = [:]
     @ObservationIgnored private var deliveryCount: UInt64 = 0
 
+    /// Clears `.localModelFallingBehind` once the local model has kept up for a while (see
+    /// `noteLocalModelFallingBehind`).
+    @ObservationIgnored private var fallingBehindExpiry: Task<Void, Never>?
+
     /// How long a capture source's `start()`, `stop()` and `endReason()`, and an engine's `stop()`, may take before the
     /// controller stops waiting and leaves that object behind. Tests shorten it.
     @ObservationIgnored var captureCallLimit: Duration = .seconds(10)
+    /// How long the engine may go on reporting after the audio ended by itself, so that the final result for the last
+    /// words still counts. Tests shorten it.
+    @ObservationIgnored var transcriptDrainLimit: Duration = .seconds(2)
 
     public init(dependencies: RuntimeDependencies) {
         self.dependencies = dependencies
@@ -201,18 +209,21 @@ public final class ListeningController {
         }
     }
 
-    /// Stops listening for the Mac's sleep, remembering to start again after it wakes, and writes the configuration
-    /// and the history that are waiting. Also the thing to call when the app quits.
+    /// Writes the configuration and the history that are waiting, then stops listening for the Mac's sleep,
+    /// remembering to start again after it wakes. Also the thing to call when the app quits.
+    ///
+    /// The writing comes first, so that a capture source or an engine that hangs while stopping cannot keep them from
+    /// the disk. A hit heard while listening stops is written after that.
     public func systemWillSleep() async {
         await command {
+            await flushStores()
             if let current = session, current.isRunning, current.kind != .snoozeTimer {
                 resumesAfterWake = true
                 await endSession()
                 showStopped(.off)
                 logger.info("Stopped listening for sleep")
+                await flushStores()
             }
-            await dependencies.configStore.flush()
-            await dependencies.historyStore.flush()
         }
     }
 
@@ -237,10 +248,10 @@ public final class ListeningController {
         let rule = configuration.rules.first
         let term =
             rule?.terms.lazy.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty }
-            ?? "NameAlert"
+            ?? AppName.current
         let hit = Hit(
             ruleID: rule?.id ?? Self.testRuleID, ruleName: "Test", term: term, matchedText: term,
-            context: "This is a test alert from NameAlert.", timestamp: dependencies.now(),
+            context: "This is a test alert from \(AppName.current).", timestamp: dependencies.now(),
             source: configuration.listening.source, engine: activeEngine ?? .appleSFSpeech, segmentID: "test")
         try await dispatcher.test(kind, hit: hit)
     }
@@ -378,7 +389,7 @@ public final class ListeningController {
             await dispatcher.configure(settings: new.channels, globalCooldownSeconds: new.globalCooldownSeconds)
         }
         if new.speech.engine != old.speech.engine || new.speech.localModelSize != old.speech.localModelSize {
-            warnings.remove(.localModelFallingBehind)
+            clearFallingBehind()
         }
         if new.speech != old.speech { _ = await resolve() }
         let listeningChanged =
@@ -392,6 +403,11 @@ public final class ListeningController {
         case .off, .snoozed:
             break  // used the next time listening starts
         }
+    }
+
+    private func flushStores() async {
+        await dependencies.configStore.flush()
+        await dependencies.historyStore.flush()
     }
 
     private func loadConfigurationIfNeeded() async {
@@ -612,6 +628,7 @@ public final class ListeningController {
         }
 
         ruleEngine.forgetSegments()  // the new engine numbers its segments from the start again
+        clearFallingBehind()  // a new engine has no backlog; it warns again if it falls behind too
         let info = ListeningInfo(engine: engine.id, source: plan.source, localeIdentifier: plan.localeIdentifier)
         let outcome = await runPipeline(chunks: chunks, source: source, engine: engine, info: info)
         await stopCapture(source)
@@ -808,6 +825,9 @@ public final class ListeningController {
 
     /// Feeds the audio to the engine and the engine's text to the rules until the audio ends, the engine stops, or the
     /// attempt is cancelled. The audio's reason for ending wins when both end.
+    ///
+    /// When the audio ends by itself, the engine still has the last words to finish: its text is read on until it
+    /// ends, for at most `transcriptDrainLimit`, so that a final result that comes just after the audio still counts.
     private func runPipeline(
         chunks: AsyncStream<AudioChunk>, source: any AudioCaptureSource, engine: any SpeechEngine, info: ListeningInfo
     ) async -> AttemptOutcome {
@@ -816,6 +836,7 @@ public final class ListeningController {
         let updates = engine.transcribe(input)
         let run = PipelineRun()
         let limit = captureCallLimit
+        let drainLimit = transcriptDrainLimit
         let end = await withTaskGroup(of: PipelineEvent?.self, returning: AttemptEnd.self) { group in
             // Both parts run on the main actor (their methods are isolated to it), as children of this group: cancelling
             // the attempt cancels them, and the group waits for them before it returns.
@@ -825,20 +846,42 @@ public final class ListeningController {
             group.addTask {
                 await self.readTranscript(updates, info: info)
             }
+            // How the attempt ends, once the audio has said why it ended.
+            var audioEnd: AttemptEnd?
+            // The engine's text ended after the audio did: nothing more is coming.
+            var transcriptEnded = false
             while let event = await group.next() {
                 switch event {
                 case .audioEnded(let reason)?:
-                    group.cancelAll()
-                    return Self.audioEnd(reason)
+                    let end = Self.audioEnd(reason)
+                    if transcriptEnded {
+                        group.cancelAll()
+                        return end
+                    }
+                    audioEnd = end
+                    group.addTask {
+                        do { try await Task.sleep(for: drainLimit) } catch { return nil }
+                        return .drainTimeUp
+                    }
                 case .engineEnded(let error)?:
-                    if run.audioEnded { continue }  // the engine only followed the audio, whose reason says why
+                    if run.audioEnded {
+                        // The engine only followed the audio, whose reason says why.
+                        transcriptEnded = true
+                        guard let audioEnd else { continue }
+                        group.cancelAll()
+                        return audioEnd
+                    }
                     group.cancelAll()
                     return error.map(Self.speechFailure) ?? .transient(.engineFailed(Self.stoppedRecognition))
+                case .drainTimeUp?:
+                    logger.notice("The speech engine was still busy after the audio ended; its last words were dropped")
+                    group.cancelAll()
+                    return audioEnd ?? .cancelled
                 case nil:
                     continue  // a part that was cancelled
                 }
             }
-            return .cancelled
+            return audioEnd ?? .cancelled
         }
         return AttemptOutcome(end: end, listeningSince: run.listeningSince)
     }
@@ -890,7 +933,15 @@ public final class ListeningController {
         }
         if let shown = run.levelShownAt, now >= shown, now.timeIntervalSince(shown) < Self.levelInterval { return }
         run.levelShownAt = now
-        level = min(1, Double(chunk.rms) * 4)
+        level = Self.level(rms: chunk.rms)
+    }
+
+    /// What the meter shows for audio this loud, from 0 to 1 on a decibel scale, the way ears hear it: −60 dBFS and
+    /// quieter show 0, full scale (0 dBFS) shows 1, and each 6 dB in between moves it a tenth.
+    nonisolated static func level(rms: Float) -> Double {
+        let decibels = 20 * log10(Double(rms) + 1e-9)
+        let level = (decibels + 60) / 60
+        return level.isNaN ? 0 : min(max(level, 0), 1)
     }
 
     /// The engine heard something: show the text, check the rules, and send the hits on.
@@ -945,9 +996,26 @@ public final class ListeningController {
     // MARK: - Warnings and previews
 
     /// The local model cannot keep up with the audio. The whisper engines report it through `ControllerBox`.
+    ///
+    /// The warning lasts until listening starts over with a new pipeline, or until two minutes pass without another
+    /// report: each report starts those two minutes again.
     func noteLocalModelFallingBehind() {
+        fallingBehindExpiry?.cancel()
+        let sleep = dependencies.sleep
+        fallingBehindExpiry = Task {
+            do { try await sleep(Self.fallingBehindQuietPeriod) } catch { return }
+            // Checked on the main actor, where a newer report cancels this one before starting its own.
+            guard !Task.isCancelled else { return }
+            self.clearFallingBehind()
+        }
         guard warnings.insert(.localModelFallingBehind).inserted else { return }
         logger.info("The local model is falling behind the audio")
+    }
+
+    private func clearFallingBehind() {
+        fallingBehindExpiry?.cancel()
+        fallingBehindExpiry = nil
+        warnings.remove(.localModelFallingBehind)
     }
 
     /// Shows the given state as it is, with nothing running behind it, for previews and screenshots (`demo`).
@@ -1037,6 +1105,8 @@ public final class ListeningController {
     /// The longest backoff, in multiples of `backoffBase`.
     static let backoffCapFactor = 30
     static let wakeDelay: Duration = .seconds(2)
+    /// How long the local model must keep up before its falling-behind warning goes away by itself.
+    static let fallingBehindQuietPeriod: Duration = .seconds(120)
     static let longestSnoozeMinutes = 7 * 24 * 60
     /// About 5 s of audio waits for an engine that falls behind; older chunks are dropped.
     static let bufferedChunks = 50
@@ -1143,6 +1213,8 @@ private final class PipelineRun {
 private enum PipelineEvent: Sendable {
     case audioEnded(CaptureEndReason?)
     case engineEnded((any Error)?)
+    /// The engine had `transcriptDrainLimit` to finish after the audio ended, and did not.
+    case drainTimeUp
 }
 
 private enum CallEvent: Sendable {

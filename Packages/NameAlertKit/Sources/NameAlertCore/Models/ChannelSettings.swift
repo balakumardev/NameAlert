@@ -93,7 +93,7 @@ public struct NtfySettings: Codable, Sendable, Equatable {
 
 public struct TelegramCallSettings: Codable, Sendable, Equatable {
     public var user = ""
-    public var messageTemplate = "NameAlert heard {keyword}: {context}"
+    public var messageTemplate = "\(AppName.current) heard {keyword}: {context}"
     public var voice = "en-US-Standard-B"
 
     public init() {}

@@ -148,7 +148,7 @@ final class AlarmPanel {
             contentRect: NSRect(x: 0, y: 0, width: Self.width, height: 160),
             styleMask: [.titled, .nonactivatingPanel, .hudWindow, .utilityWindow, .fullSizeContentView],
             backing: .buffered, defer: false)
-        panel.title = "NameAlert"
+        panel.title = AppName.current
         panel.titleVisibility = .hidden
         panel.titlebarAppearsTransparent = true
         for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
@@ -160,7 +160,7 @@ final class AlarmPanel {
         panel.hidesOnDeactivate = false  // the app is never the active one; the default would hide the panel at once
         panel.isReleasedWhenClosed = false
         panel.isMovableByWindowBackground = true
-        panel.setAccessibilityLabel("NameAlert alarm")
+        panel.setAccessibilityLabel("\(AppName.current) alarm")
         return panel
     }
 }

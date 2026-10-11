@@ -185,7 +185,7 @@ struct ListeningControllerTests {
         #expect(h.controller.lastHitAt == h.clock.now)
         #expect(h.controller.activeEngine == .appleSpeechTranscriber)
         #expect(h.controller.liveTranscript == "hey Bala")
-        #expect(abs(h.controller.level - 0.4) < 0.001)  // min(1, rms × 4) with an rms of 0.1
+        #expect(abs(h.controller.level - 2.0 / 3) < 0.001)  // an rms of 0.1 is −20 dBFS
         #expect(h.speech.preparedLocales == ["en-US"])
         #expect(h.speech.preparedHints == [["Bala"]])
         await h.finish()
@@ -486,6 +486,33 @@ struct ListeningControllerTests {
         await h.finish()
     }
 
+    @Test func aFinalJustAfterTheAudioEndsStillCounts() async throws {
+        let h = try Harness(
+            capture: FakeCapture([.init(chunks: 1, ending: .stoppedByUser)]),
+            speech: FakeSpeech([.init(late: final("s1", "hey Bala"))]))  // 50 ms after the audio ends
+        await h.controller.bootstrap()
+        await h.controller.start()
+        #expect(await eventually { h.channel.hits.count == 1 })
+        #expect(await eventually { h.controller.state == .off })  // the user stopped capture: no retry
+        #expect(h.controller.recentHits.map(\.term) == ["Bala"])
+        #expect(h.capture.startCount == 1)
+        await h.finish()
+    }
+
+    @Test func waitingForTheLastWordsIsBounded() async throws {
+        let h = try Harness(
+            capture: FakeCapture([.init(chunks: 1, ending: .stoppedByUser)]),
+            speech: FakeSpeech([.init(staysOpenAfterAudio: true)]))
+        h.controller.transcriptDrainLimit = .milliseconds(100)
+        await h.controller.bootstrap()
+        await h.controller.start()
+        #expect(await eventually { h.capture.startCount == 1 && h.controller.state == .off })
+        #expect(await eventually { h.speech.activeRuns == 0 })  // its stream was let go
+        #expect(h.speech.stopCount == 1)
+        #expect(h.capture.activeRuns == 0)
+        await h.finish()
+    }
+
     @Test func restartDoesNotSuppressFirstMention() async throws {
         let h = try Harness(
             capture: FakeCapture([.init(chunks: 1, ending: .failWhenTriggered("Output device changed")), .init()]),
@@ -656,6 +683,34 @@ struct ListeningControllerTests {
         await h.finish()
     }
 
+    @Test func fallingBehindWarningClearsWhenThePipelineStartsOver() async throws {
+        let h = try Harness(
+            capabilities: .noAppleSpeech,
+            capture: FakeCapture([.init(chunks: 1, ending: .failWhenTriggered("Output device changed")), .init()]))
+        #expect(await h.startListening())
+        h.controller.noteLocalModelFallingBehind()
+        #expect(h.controller.warnings == [.localModelFallingBehind])
+        h.capture.failTrigger.open()
+        #expect(await eventually { h.capture.startCount == 2 && h.controller.state.isListening })
+        #expect(h.controller.warnings.isEmpty)
+        await h.finish()
+    }
+
+    @Test func fallingBehindWarningClearsAfterTwoQuietMinutes() async throws {
+        let h = try Harness(capabilities: .noAppleSpeech)
+        #expect(await h.startListening())
+        h.controller.noteLocalModelFallingBehind()
+        #expect(await eventually { h.sleeper.durations == [.seconds(120)] })
+        h.controller.noteLocalModelFallingBehind()  // another report starts the two minutes again
+        #expect(await eventually { h.sleeper.durations == [.seconds(120), .seconds(120)] })
+        #expect(await eventually { h.sleeper.cancellations == 1 })
+        #expect(h.controller.warnings == [.localModelFallingBehind])
+        h.sleeper.gate.open()  // two minutes without another report
+        #expect(await eventually { h.controller.warnings.isEmpty })
+        #expect(h.controller.state.isListening)
+        await h.finish()
+    }
+
     @Test func fallingBehindWarningIsClearedByAnotherModelSize() async throws {
         let h = try Harness(capabilities: .noAppleSpeech)
         #expect(await h.startListening())
@@ -741,6 +796,23 @@ struct ListeningControllerTests {
         await h.controller.systemWillSleep()
         #expect(try h.hitsOnDisk() == 1)
         #expect(try h.configurationOnDisk().globalCooldownSeconds == 7)
+        await h.finish()
+    }
+
+    @Test func sleepWritesBeforeStoppingACaptureThatHangs() async throws {
+        let h = try Harness(capture: FakeCapture([.init(stopHangs: true)]), speech: heyBala())
+        #expect(await h.startListening())
+        #expect(await eventually { await h.controller.history().count == 1 })
+        await h.controller.update { $0.globalCooldownSeconds = 7 }
+        #expect(try h.hitsOnDisk() == 0)  // both stores wait a minute before writing
+        let sleep = Task { await h.controller.systemWillSleep() }
+        #expect(await eventually { h.capture.stopsInFlight == 1 })  // stopping capture hangs...
+        #expect(try h.hitsOnDisk() == 1)  // ...and both stores were written before it
+        #expect(try h.configurationOnDisk().globalCooldownSeconds == 7)
+        h.capture.stopGate.open()
+        await sleep.value
+        #expect(h.controller.state == .off)
+        #expect(h.capture.activeRuns == 0)
         await h.finish()
     }
 
@@ -843,6 +915,19 @@ struct ListeningControllerTests {
         #expect(await h.controller.history().isEmpty)
         #expect(h.controller.recentHits.isEmpty)
         await h.finish()
+    }
+
+    // MARK: The level meter
+
+    @Test func levelIsOnADecibelScale() {
+        #expect(ListeningController.level(rms: 1) == 1)  // full scale, 0 dBFS
+        #expect(abs(ListeningController.level(rms: 0.1) - 2.0 / 3) < 1e-6)  // −20 dBFS
+        #expect(abs(ListeningController.level(rms: 0.01) - 1.0 / 3) < 1e-6)  // −40 dBFS
+        #expect(ListeningController.level(rms: 0.001) < 1e-6)  // −60 dBFS
+        #expect(ListeningController.level(rms: 0.0001) == 0)  // quieter than that
+        #expect(ListeningController.level(rms: 0) == 0)  // silence
+        #expect(ListeningController.level(rms: 2) == 1)  // past full scale
+        #expect(ListeningController.level(rms: .nan) == 0)
     }
 }
 

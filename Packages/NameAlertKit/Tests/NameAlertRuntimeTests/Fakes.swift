@@ -85,6 +85,7 @@ final class TestSleeper: Sendable {
     let gate = Gate()
     private let gatedFrom: Duration
     private let recorded = OSAllocatedUnfairLock(initialState: [Duration]())
+    private let cancelled = OSAllocatedUnfairLock(initialState: 0)
 
     /// - Parameter gatedFrom: `.zero` holds every sleep at the gate; the default holds the snooze and the pause after
     ///   waking, and lets backoffs run.
@@ -93,13 +94,20 @@ final class TestSleeper: Sendable {
     }
 
     var durations: [Duration] { recorded.withLock { $0 } }
+    /// Sleeps that ended early because their task was cancelled.
+    var cancellations: Int { cancelled.withLock { $0 } }
 
     func sleep(_ duration: Duration) async throws {
         recorded.withLock { $0.append(duration) }
-        if duration >= gatedFrom {
-            try await gate.wait()
-        } else {
-            try await Task.sleep(for: duration)
+        do {
+            if duration >= gatedFrom {
+                try await gate.wait()
+            } else {
+                try await Task.sleep(for: duration)
+            }
+        } catch {
+            cancelled.withLock { $0 += 1 }
+            throw error
         }
     }
 }
@@ -166,15 +174,18 @@ final class FakeCapture: Sendable {
         var startHangs = false
         /// `start()` throws this instead of starting.
         var startError: AudioCaptureError?
+        /// `stop()` of this run does not return until `stopGate` opens, like a capture that hangs while stopping.
+        var stopHangs = false
 
         init(
             chunks: Int = 1, ending: Ending = .stayOpen, startHangs: Bool = false,
-            startError: AudioCaptureError? = nil
+            startError: AudioCaptureError? = nil, stopHangs: Bool = false
         ) {
             self.chunks = chunks
             self.ending = ending
             self.startHangs = startHangs
             self.startError = startError
+            self.stopHangs = stopHangs
         }
     }
 
@@ -184,10 +195,12 @@ final class FakeCapture: Sendable {
         var startCount = 0
         var stopCount = 0
         var startsInFlight = 0
+        var stopsInFlight = 0
         var activeRuns = 0
     }
 
     let startGate = Gate()
+    let stopGate = Gate()
     let failTrigger = Gate()
     private let state: OSAllocatedUnfairLock<State>
 
@@ -200,6 +213,8 @@ final class FakeCapture: Sendable {
     var stopCount: Int { state.withLock { $0.stopCount } }
     /// `start()` calls that have not returned yet.
     var startsInFlight: Int { state.withLock { $0.startsInFlight } }
+    /// `stop()` calls that hang and have not returned yet.
+    var stopsInFlight: Int { state.withLock { $0.stopsInFlight } }
     /// Runs that started and have not ended: pipelines holding a device.
     var activeRuns: Int { state.withLock { $0.activeRuns } }
 
@@ -228,6 +243,13 @@ final class FakeCapture: Sendable {
         state.withLock { $0.stopCount += 1 }
     }
 
+    /// A `stop()` that hangs: it returns once `stopGate` opens, whether or not its task is cancelled.
+    fileprivate func hangWhileStopping() async {
+        state.withLock { $0.stopsInFlight += 1 }
+        await stopGate.waitIgnoringCancellation()
+        state.withLock { $0.stopsInFlight -= 1 }
+    }
+
     fileprivate func runEnded() {
         state.withLock { $0.activeRuns -= 1 }
     }
@@ -237,6 +259,7 @@ private final class FakeSource: AudioCaptureSource {
     private struct Run: Sendable {
         var continuation: AsyncStream<AudioChunk>.Continuation?
         var endReason: CaptureEndReason?
+        var stopHangs = false
     }
 
     private let capture: FakeCapture
@@ -254,7 +277,7 @@ private final class FakeSource: AudioCaptureSource {
             throw error
         }
         let (stream, continuation) = AsyncStream.makeStream(of: AudioChunk.self)
-        run.withLock { $0 = Run(continuation: continuation, endReason: nil) }
+        run.withLock { $0 = Run(continuation: continuation, endReason: nil, stopHangs: script.stopHangs) }
         capture.startReturned(running: true)
         let capture = capture
         Task {
@@ -275,6 +298,7 @@ private final class FakeSource: AudioCaptureSource {
 
     func stop() async {
         capture.stopped()
+        if run.withLock({ $0.stopHangs }) { await capture.hangWhileStopping() }
         end(.stopped)
     }
 
@@ -308,14 +332,23 @@ final class FakeSpeech: Sendable {
         /// After this many chunks, the stream fails with `failure`.
         var failAfterChunks: Int?
         var failure = SpeechEngineError.engineFailed("The recognizer crashed")
+        /// Emitted `lateDelay` after the audio ends, the way a final result for the last words comes.
+        var late: TranscriptUpdate?
+        var lateDelay: Duration = .milliseconds(50)
+        /// The stream does not end when the audio does, only when it is cancelled: an engine that never finishes.
+        var staysOpenAfterAudio = false
 
         init(
             _ updates: [TranscriptUpdate] = [], failAfterChunks: Int? = nil,
-            failure: SpeechEngineError = .engineFailed("The recognizer crashed")
+            failure: SpeechEngineError = .engineFailed("The recognizer crashed"), late: TranscriptUpdate? = nil,
+            lateDelay: Duration = .milliseconds(50), staysOpenAfterAudio: Bool = false
         ) {
             self.updates = updates
             self.failAfterChunks = failAfterChunks
             self.failure = failure
+            self.late = late
+            self.lateDelay = lateDelay
+            self.staysOpenAfterAudio = staysOpenAfterAudio
         }
     }
 
@@ -424,6 +457,12 @@ private struct FakeEngine: SpeechEngine {
                     output.finish(throwing: script.failure)
                     return
                 }
+            }
+            if let late = script.late, (try? await Task.sleep(for: script.lateDelay)) != nil {
+                output.yield(late)
+            }
+            if script.staysOpenAfterAudio {
+                try? await Task.sleep(for: .seconds(3_600))  // until the reader goes away and cancels this
             }
             output.finish()
         }
