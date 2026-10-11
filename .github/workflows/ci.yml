@@ -1,0 +1,167 @@
+name: CI
+
+# Builds and tests NameAlert on GitHub-hosted runners. No secrets here, so it is safe on pull requests.
+#
+#   macos-26   swift test, then an unsigned universal Release build that must produce no warnings
+#              in NameAlert/ or Packages/
+#   macos-15   swift test only, so the code paths for older macOS versions run too. If that image has no
+#              Xcode 26 or later, the leg ends early and the job still passes.
+
+on:
+  pull_request:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-26
+            full: true
+            optional: false
+          - os: macos-15
+            full: false
+            optional: true
+    steps:
+      - name: Select the newest Xcode (26 or later)
+        id: xcode
+        env:
+          XCODE_MIN_MAJOR: '26'
+          XCODE_SKIP_IF_MISSING: ${{ matrix.optional }}
+        run: |
+          # Picks the highest Xcode in /Applications whose version is at least XCODE_MIN_MAJOR.
+          # A beta is fine here: this workflow only builds and tests, it never uploads anything.
+          best_key=0
+          best_app=""
+          best_version=""
+          seen=""
+          version_re='^[0-9]+(\.[0-9]+){0,2}$'
+          for app in /Applications/Xcode*.app; do
+            [[ -f "$app/Contents/version.plist" ]] || continue
+            real="$(cd -P "$app" && pwd)"
+            version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$real/Contents/version.plist" 2>/dev/null || true)"
+            seen="$seen $(basename "$real")($version)"
+            [[ "$version" =~ $version_re ]] || continue
+            IFS=. read -r major minor patch <<<"$version"
+            (( major >= XCODE_MIN_MAJOR )) || continue
+            key=$(( major * 1000000 + ${minor:-0} * 1000 + ${patch:-0} ))
+            if (( key > best_key )); then
+              best_key=$key
+              best_app=$real
+              best_version=$version
+            fi
+          done
+          if [[ -z "$best_app" ]]; then
+            if [[ "$XCODE_SKIP_IF_MISSING" == "true" ]]; then
+              echo "::notice::No Xcode $XCODE_MIN_MAJOR or later on this runner image (found:${seen:- none}). Skipping the remaining steps."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error::No Xcode $XCODE_MIN_MAJOR or later on this runner image (found:${seen:- none})."
+            exit 1
+          fi
+          echo "Using $best_app (Xcode $best_version)"
+          sudo xcode-select -s "$best_app/Contents/Developer"
+          xcodebuild -version
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the code
+        if: steps.xcode.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Cache SwiftPM binary artifacts
+        if: steps.xcode.outputs.skip != 'true'
+        uses: actions/cache@v4
+        with:
+          path: Packages/NameAlertKit/.build/artifacts
+          # The package has one binary dependency (the whisper.cpp xcframework). Its URL and checksum live in
+          # Package.swift, and Package.resolved is gitignored and may not exist, so both files go into the key.
+          key: ${{ runner.os }}-${{ runner.arch }}-spm-artifacts-${{ hashFiles('Packages/NameAlertKit/Package.resolved', 'Packages/NameAlertKit/Package.swift') }}
+
+      - name: Run the package tests
+        if: steps.xcode.outputs.skip != 'true'
+        run: swift test --package-path Packages/NameAlertKit
+
+      - name: Install XcodeGen
+        if: steps.xcode.outputs.skip != 'true' && matrix.full
+        run: command -v xcodegen >/dev/null || brew install xcodegen
+
+      - name: Generate the Xcode project
+        if: steps.xcode.outputs.skip != 'true' && matrix.full
+        run: xcodegen generate
+
+      - name: Build a universal Release app without signing
+        if: steps.xcode.outputs.skip != 'true' && matrix.full
+        run: |
+          mkdir -p build
+          xcodebuild build \
+            -project NameAlert.xcodeproj \
+            -scheme NameAlert \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath build/DerivedData \
+            ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee build/build.log
+
+      - name: Fail on warnings in NameAlert/ and Packages/
+        if: steps.xcode.outputs.skip != 'true' && matrix.full
+        run: |
+          # Only warnings that point into our own sources count. Xcode's own messages, such as the
+          # appintentsmetadataprocessor ones, do not start with a path and are ignored.
+          if grep -E "^/.*/(NameAlert|Packages)/.*: warning:" build/build.log; then
+            echo "::error::The build produced warnings in NameAlert/ or Packages/ (listed above). The project builds with none."
+            exit 1
+          fi
+          echo "No warnings in NameAlert/ or Packages/."
+
+      - name: Check that the app is universal
+        if: steps.xcode.outputs.skip != 'true' && matrix.full
+        run: |
+          app="build/DerivedData/Build/Products/Release/NameAlert.app"
+          if [[ ! -d "$app" ]]; then
+            echo "::error::$app was not built."
+            exit 1
+          fi
+          bad=0
+          count=0
+          while IFS= read -r -d '' file; do
+            archs="$(lipo -archs "$file" 2>/dev/null)" || continue
+            count=$((count + 1))
+            for arch in arm64 x86_64; do
+              case " $archs " in
+                *" $arch "*) ;;
+                *)
+                  echo "::error::${file#"$app"/} has no $arch slice (it has: $archs)."
+                  bad=1
+                  ;;
+              esac
+            done
+          done < <(find "$app/Contents" -type f \( -perm -u+x -o -name '*.dylib' \) -print0)
+          if [[ $count -eq 0 ]]; then
+            echo "::error::Found no Mach-O files in $app."
+            exit 1
+          fi
+          if [[ $bad -ne 0 ]]; then
+            exit 1
+          fi
+          echo "All $count Mach-O files in the app include arm64 and x86_64."

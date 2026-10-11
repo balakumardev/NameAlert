@@ -1,0 +1,518 @@
+name: App Store
+
+# Builds the Mac App Store package and puts it in App Store Connect.
+#
+#   push to main (app paths)   run the tests, sign, build, validate, upload to App Store Connect (TestFlight)
+#   push of a v* tag           the same, then sync appstore/asc, create or update the App Store version,
+#                              attach the build and submit it for review (released automatically once approved)
+#   manual run                 like a push to main; tick "submit" to submit for review as well
+#
+# The build number is the commit count, so a commit keeps its number when it is tagged after main has
+# uploaded it. A tag or "submit" run finds that build in App Store Connect and uses it instead of
+# uploading a second copy, which App Store Connect would refuse.
+#
+# Secrets: MAS_SIGNING_P12, MAS_SIGNING_PASSWORD, MAS_PROVISIONING_PROFILE, APP_STORE_CONNECT_API_KEY_P8,
+# APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID. Variable: ASC_APP_ID.
+# This workflow uses secrets, so it never runs on pull requests. A missing secret fails the run.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'NameAlert/**'
+      - 'Packages/**'
+      - 'project.yml'
+      - 'appstore/**'
+      - 'scripts/build_appstore.sh'
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      submit:
+        description: 'Submit the build for App Review after it has processed'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: appstore
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  appstore:
+    name: Build, upload and submit
+    runs-on: macos-26
+    timeout-minutes: 150
+    env:
+      ASC_APP_ID: ${{ vars.ASC_APP_ID }}
+      APP_COPYRIGHT: '2026 CoolSolve LLP'
+      ASC_SKILLS_AUTO_CHECK: 'false'
+    steps:
+      - name: Select the newest Xcode (26 or later)
+        env:
+          XCODE_MIN_MAJOR: '26'
+        run: |
+          # Picks the highest Xcode in /Applications whose version is at least XCODE_MIN_MAJOR.
+          # Betas are skipped: App Store Connect rejects uploads built with one.
+          best_key=0
+          best_app=""
+          best_version=""
+          seen=""
+          version_re='^[0-9]+(\.[0-9]+){0,2}$'
+          for app in /Applications/Xcode*.app; do
+            [[ -f "$app/Contents/version.plist" ]] || continue
+            real="$(cd -P "$app" && pwd)"
+            version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$real/Contents/version.plist" 2>/dev/null || true)"
+            seen="$seen $(basename "$real")($version)"
+            [[ "$version" =~ $version_re ]] || continue
+            IFS=. read -r major minor patch <<<"$version"
+            (( major >= XCODE_MIN_MAJOR )) || continue
+            case "$(basename "$real")" in
+              *[Bb]eta*) continue ;;
+            esac
+            key=$(( major * 1000000 + ${minor:-0} * 1000 + ${patch:-0} ))
+            if (( key > best_key )); then
+              best_key=$key
+              best_app=$real
+              best_version=$version
+            fi
+          done
+          if [[ -z "$best_app" ]]; then
+            echo "::error::No Xcode $XCODE_MIN_MAJOR or later (not a beta) on this runner image (found:${seen:- none})."
+            exit 1
+          fi
+          echo "Using $best_app (Xcode $best_version)"
+          sudo xcode-select -s "$best_app/Contents/Developer"
+          xcodebuild -version
+
+      - name: Check out the code
+        uses: actions/checkout@v4
+        with:
+          # The build number is the commit count, which a shallow clone gets wrong.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Work out the version, the build number and what this run does
+        id: plan
+        env:
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          SUBMIT_INPUT: ${{ inputs.submit }}
+        run: |
+          version="$(grep -E 'MARKETING_VERSION:' project.yml | head -1 | sed -E 's/.*MARKETING_VERSION:[[:space:]]*"?([0-9][0-9.]*)"?.*/\1/')"
+          version_re='^[0-9]+(\.[0-9]+){0,2}$'
+          if ! [[ "$version" =~ $version_re ]]; then
+            echo "::error::Could not read MARKETING_VERSION from project.yml (got '$version')."
+            exit 1
+          fi
+
+          # Only main and tags may publish. A build from another branch would use up build numbers.
+          if [[ "$REF" != "refs/heads/main" && "$REF_TYPE" != "tag" ]]; then
+            echo "::error::This workflow publishes only from main or a v* tag, not from $REF."
+            exit 1
+          fi
+          if [[ "$REF_TYPE" == "tag" && "$REF_NAME" != "v$version" ]]; then
+            echo "::error::The tag $REF_NAME does not match MARKETING_VERSION $version in project.yml (expected v$version)."
+            exit 1
+          fi
+
+          submit=false
+          if [[ "$REF_TYPE" == "tag" || "$SUBMIT_INPUT" == "true" ]]; then
+            submit=true
+          fi
+
+          if [[ "$(git rev-parse --is-shallow-repository)" == "true" ]]; then
+            echo "::error::The checkout is shallow, so the commit count would be wrong."
+            exit 1
+          fi
+          build_number="$(git rev-list --count HEAD)"
+
+          {
+            echo "version=$version"
+            echo "build_number=$build_number"
+            echo "submit=$submit"
+          } >> "$GITHUB_OUTPUT"
+          echo "NameAlert $version, build $build_number, submit for review: $submit"
+
+      - name: Check that every secret and variable is set
+        env:
+          MAS_SIGNING_P12: ${{ secrets.MAS_SIGNING_P12 }}
+          MAS_SIGNING_PASSWORD: ${{ secrets.MAS_SIGNING_PASSWORD }}
+          MAS_PROVISIONING_PROFILE: ${{ secrets.MAS_PROVISIONING_PROFILE }}
+          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          missing=0
+          for name in MAS_SIGNING_P12 MAS_SIGNING_PASSWORD MAS_PROVISIONING_PROFILE \
+                      APP_STORE_CONNECT_API_KEY_P8 APP_STORE_CONNECT_KEY_ID APP_STORE_CONNECT_ISSUER_ID; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::missing secret: $name"
+              missing=1
+            fi
+          done
+          if [[ -z "${ASC_APP_ID:-}" ]]; then
+            echo "::error::missing variable: ASC_APP_ID"
+            missing=1
+          fi
+          if [[ $missing -ne 0 ]]; then
+            echo "::error::Add the missing values under Settings > Secrets and variables > Actions, then run this workflow again."
+            exit 1
+          fi
+
+      - name: Install xcodegen, asc and jq
+        env:
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+          HOMEBREW_NO_ENV_HINTS: '1'
+        run: |
+          for tool in xcodegen asc jq; do
+            command -v "$tool" >/dev/null || brew install "$tool"
+          done
+          asc --version
+          # asc sends anonymous usage events unless told not to. Nothing should leave this job but the API calls.
+          asc telemetry disable > /dev/null || true
+
+      - name: Put the App Store Connect API key in place
+        env:
+          KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          umask 077
+          # A secret set from a file can carry a trailing newline.
+          KEY_ID="$(printf '%s' "$KEY_ID" | tr -d '[:space:]')"
+          ISSUER_ID="$(printf '%s' "$ISSUER_ID" | tr -d '[:space:]')"
+          if ! [[ "$KEY_ID" =~ ^[A-Za-z0-9]{10}$ ]]; then
+            echo "::error::APP_STORE_CONNECT_KEY_ID should be the 10-character key ID."
+            exit 1
+          fi
+          if ! [[ "$ISSUER_ID" =~ ^[0-9A-Fa-f-]{36}$ ]]; then
+            echo "::error::APP_STORE_CONNECT_ISSUER_ID should be the issuer UUID."
+            exit 1
+          fi
+          key="$RUNNER_TEMP/AuthKey_${KEY_ID}.p8"
+          # The secret holds the .p8 as base64. A plain PEM is accepted too.
+          if ! printf '%s' "$KEY_P8" | base64 --decode > "$key" 2>/dev/null || ! grep -q 'BEGIN PRIVATE KEY' "$key"; then
+            printf '%s\n' "$KEY_P8" > "$key"
+          fi
+          if ! grep -q 'BEGIN PRIVATE KEY' "$key"; then
+            rm -f "$key"
+            echo "::error::APP_STORE_CONNECT_API_KEY_P8 is not a .p8 private key (plain or base64)."
+            exit 1
+          fi
+          chmod 600 "$key"
+          # altool looks for AuthKey_<key id>.p8 in ~/.appstoreconnect/private_keys.
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          cp "$key" "$HOME/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8"
+          # asc reads these three, and with all of them set it ignores stored credentials.
+          # Strict auth makes it fail rather than mix sources. The scripts read ASC_KEY_PATH.
+          {
+            echo "ASC_KEY_ID=$KEY_ID"
+            echo "ASC_ISSUER_ID=$ISSUER_ID"
+            echo "ASC_PRIVATE_KEY_PATH=$key"
+            echo "ASC_KEY_PATH=$key"
+            echo "ASC_STRICT_AUTH=true"
+            echo "ASC_CONFIG_PATH=$RUNNER_TEMP/asc/config.json"
+          } >> "$GITHUB_ENV"
+
+      - name: Look for this build in App Store Connect
+        id: existing
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+          BUILD_NUMBER: ${{ steps.plan.outputs.build_number }}
+        run: |
+          json="$(asc builds list --app "$ASC_APP_ID" --platform MAC_OS --version "$VERSION" \
+            --build-number "$BUILD_NUMBER" --processing-state all --output json)"
+          state="$(jq -r '.data[0].attributes.processingState // empty' <<<"$json")"
+          exists=false
+          case "$state" in
+            "") ;;
+            VALID | PROCESSING) exists=true ;;
+            *)
+              echo "::error::Build $BUILD_NUMBER of $VERSION is already in App Store Connect and is $state. Push a new commit to get a new build number."
+              exit 1
+              ;;
+          esac
+          echo "exists=$exists" >> "$GITHUB_OUTPUT"
+          if [[ "$exists" == "true" ]]; then
+            echo "::notice::Build $BUILD_NUMBER of $VERSION is already in App Store Connect ($state), so it is not built or uploaded again."
+          fi
+
+      - name: Check the App Store metadata
+        if: steps.plan.outputs.submit == 'true'
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          if [[ ! -d "appstore/asc/version/$VERSION" ]]; then
+            echo "::error::appstore/asc/version/$VERSION is missing. Add the listing text for $VERSION before tagging."
+            exit 1
+          fi
+          asc metadata validate --dir appstore/asc --pretty
+
+      - name: Cache SwiftPM binary artifacts
+        if: steps.existing.outputs.exists != 'true'
+        uses: actions/cache@v4
+        with:
+          path: Packages/NameAlertKit/.build/artifacts
+          # The package has one binary dependency (the whisper.cpp xcframework). Its URL and checksum live in
+          # Package.swift, and Package.resolved is gitignored and may not exist, so both files go into the key.
+          key: ${{ runner.os }}-${{ runner.arch }}-spm-artifacts-${{ hashFiles('Packages/NameAlertKit/Package.resolved', 'Packages/NameAlertKit/Package.swift') }}
+
+      - name: Run the package tests
+        if: steps.existing.outputs.exists != 'true'
+        run: swift test --package-path Packages/NameAlertKit
+
+      - name: Generate the Xcode project
+        if: steps.existing.outputs.exists != 'true'
+        run: xcodegen generate
+
+      - name: Import the Mac App Store signing identities
+        id: signing
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          MAS_SIGNING_P12: ${{ secrets.MAS_SIGNING_P12 }}
+          MAS_SIGNING_PASSWORD: ${{ secrets.MAS_SIGNING_PASSWORD }}
+        run: |
+          umask 077
+          keychain="$RUNNER_TEMP/namealert-signing.keychain-db"
+          keychain_password="$(openssl rand -base64 24)"
+          p12="$RUNNER_TEMP/mas-signing.p12"
+
+          if ! printf '%s' "$MAS_SIGNING_P12" | base64 --decode > "$p12"; then
+            echo "::error::MAS_SIGNING_P12 is not valid base64."
+            exit 1
+          fi
+
+          # A keychain that exists only for this job. The cleanup step deletes it.
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$p12" -k "$keychain" -P "$MAS_SIGNING_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productbuild
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
+          rm -f "$p12"
+
+          # codesign and productbuild only look in keychains on the search list.
+          existing_keychains="$(security list-keychains -d user | tr -d '"')"
+          # shellcheck disable=SC2086
+          security list-keychains -d user -s "$keychain" $existing_keychains
+
+          # By SHA-1, because names can match more than one certificate.
+          mas_identity="$(security find-identity -v -p codesigning "$keychain" \
+            | awk '/"Apple Distribution: .*\(KHD36T7C97\)"/ && !found { id = $2; found = 1 } END { print id }')"
+          if [[ -z "$mas_identity" ]]; then
+            mas_identity="$(security find-identity -v -p codesigning "$keychain" \
+              | awk '/"3rd Party Mac Developer Application: .*\(KHD36T7C97\)"/ && !found { id = $2; found = 1 } END { print id }')"
+          fi
+          installer_identity="$(security find-identity -v "$keychain" \
+            | awk '/"3rd Party Mac Developer Installer: .*\(KHD36T7C97\)"/ && !found { id = $2; found = 1 } END { print id }')"
+          if [[ -z "$installer_identity" ]]; then
+            installer_identity="$(security find-identity -v "$keychain" \
+              | awk '/"Mac Installer Distribution: .*\(KHD36T7C97\)"/ && !found { id = $2; found = 1 } END { print id }')"
+          fi
+          if [[ -z "$mas_identity" ]]; then
+            echo "::error::MAS_SIGNING_P12 has no valid Apple Distribution identity for team KHD36T7C97. Identities in it:"
+            security find-identity -p codesigning "$keychain" || true
+            exit 1
+          fi
+          if [[ -z "$installer_identity" ]]; then
+            echo "::error::MAS_SIGNING_P12 has no valid 3rd Party Mac Developer Installer identity for team KHD36T7C97, which signs the .pkg. Identities in it:"
+            security find-identity "$keychain" || true
+            exit 1
+          fi
+
+          {
+            echo "keychain=$keychain"
+            echo "mas_identity=$mas_identity"
+            echo "installer_identity=$installer_identity"
+          } >> "$GITHUB_OUTPUT"
+          echo "Signing with Apple Distribution $mas_identity and installer $installer_identity"
+
+      - name: Install the Mac App Store provisioning profile
+        id: profile
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          MAS_PROVISIONING_PROFILE: ${{ secrets.MAS_PROVISIONING_PROFILE }}
+        run: |
+          umask 077
+          profile="$RUNNER_TEMP/NameAlert_MacAppStore.provisionprofile"
+          plist="$RUNNER_TEMP/profile.plist"
+          if ! printf '%s' "$MAS_PROVISIONING_PROFILE" | base64 --decode > "$profile"; then
+            echo "::error::MAS_PROVISIONING_PROFILE is not valid base64."
+            exit 1
+          fi
+          security cms -D -i "$profile" > "$plist"
+          field() { plutil -extract "$1" raw -o - "$plist"; }
+          uuid="$(field UUID)"
+          name="$(field Name)"
+          app_identifier="$(field 'Entitlements.com\.apple\.application-identifier')"
+          expires="$(field ExpirationDate)"
+          echo "Profile: $name ($uuid) for $app_identifier, expires $expires"
+          if [[ "$app_identifier" != "KHD36T7C97.dev.balakumar.namealert" ]]; then
+            echo "::error::MAS_PROVISIONING_PROFILE is for $app_identifier, not KHD36T7C97.dev.balakumar.namealert."
+            exit 1
+          fi
+          if [[ "$expires" < "$(date -u +%Y-%m-%dT%H:%M:%SZ)" ]]; then
+            echo "::error::The Mac App Store provisioning profile expired on $expires. Make a new one and update MAS_PROVISIONING_PROFILE."
+            exit 1
+          fi
+          # Xcode 16 and later read the first folder; older tools read the second.
+          for dir in "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" "$HOME/Library/MobileDevice/Provisioning Profiles"; do
+            mkdir -p "$dir"
+            cp "$profile" "$dir/$uuid.provisionprofile"
+          done
+          rm -f "$plist"
+          {
+            echo "path=$profile"
+            echo "uuid=$uuid"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Archive and export the App Store package
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          BUILD_NUMBER: ${{ steps.plan.outputs.build_number }}
+          APPLE_BUILD_KEYCHAIN: ${{ steps.signing.outputs.keychain }}
+          MAS_IDENTITY_SHA1: ${{ steps.signing.outputs.mas_identity }}
+          INSTALLER_IDENTITY_SHA1: ${{ steps.signing.outputs.installer_identity }}
+          MAS_PROFILE_PATH: ${{ steps.profile.outputs.path }}
+        run: |
+          bash scripts/build_appstore.sh
+          pkg=dist/appstore/NameAlert.pkg
+          if [[ ! -f "$pkg" ]]; then
+            echo "::error::scripts/build_appstore.sh finished without making $pkg."
+            exit 1
+          fi
+          pkgutil --check-signature "$pkg"
+
+      - name: Validate the package with App Store Connect
+        if: steps.existing.outputs.exists != 'true'
+        run: |
+          # altool finds AuthKey_<key id>.p8 in ~/.appstoreconnect/private_keys.
+          xcrun altool --validate-app -f dist/appstore/NameAlert.pkg -t macos \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+
+      - name: Upload to App Store Connect (TestFlight)
+        id: upload
+        if: steps.existing.outputs.exists != 'true'
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+          BUILD_NUMBER: ${{ steps.plan.outputs.build_number }}
+        run: |
+          asc publish testflight --app "$ASC_APP_ID" --platform MAC_OS \
+            --pkg dist/appstore/NameAlert.pkg --version "$VERSION" --build-number "$BUILD_NUMBER" \
+            --upload-only --wait --timeout 60m --pretty
+
+      - name: Find the processed build
+        id: build
+        if: steps.plan.outputs.submit == 'true'
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+          BUILD_NUMBER: ${{ steps.plan.outputs.build_number }}
+        run: |
+          asc builds wait --app "$ASC_APP_ID" --platform MAC_OS --version "$VERSION" \
+            --build-number "$BUILD_NUMBER" --timeout 60m --fail-on-invalid --pretty
+          json="$(asc builds list --app "$ASC_APP_ID" --platform MAC_OS --version "$VERSION" \
+            --build-number "$BUILD_NUMBER" --processing-state VALID --output json)"
+          build_id="$(jq -r '.data[0].id // empty' <<<"$json")"
+          if [[ -z "$build_id" ]]; then
+            echo "::error::App Store Connect has no processed macOS build $VERSION ($BUILD_NUMBER)."
+            exit 1
+          fi
+          echo "build_id=$build_id" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update the App Store version
+        id: version
+        if: steps.plan.outputs.submit == 'true'
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          find_version_id() {
+            asc versions list --app "$ASC_APP_ID" --platform MAC_OS --version "$VERSION" --output json \
+              | jq -r '.data[0].id // empty'
+          }
+          version_id="$(find_version_id)"
+          if [[ -z "$version_id" ]]; then
+            # AFTER_APPROVAL releases the version automatically once App Review approves it.
+            asc versions create --app "$ASC_APP_ID" --platform MAC_OS --version "$VERSION" \
+              --release-type AFTER_APPROVAL --copyright "$APP_COPYRIGHT" --pretty
+            version_id="$(find_version_id)"
+          else
+            asc versions update --version-id "$version_id" \
+              --release-type AFTER_APPROVAL --copyright "$APP_COPYRIGHT" --pretty
+          fi
+          if [[ -z "$version_id" ]]; then
+            echo "::error::Could not find or create version $VERSION in App Store Connect."
+            exit 1
+          fi
+          echo "version_id=$version_id" >> "$GITHUB_OUTPUT"
+
+          # Listing text for the app and for this version, from appstore/asc.
+          asc metadata push --app "$ASC_APP_ID" --version "$VERSION" --platform MAC_OS \
+            --dir appstore/asc --pretty
+
+      - name: Attach the build and check readiness
+        if: steps.plan.outputs.submit == 'true'
+        env:
+          VERSION_ID: ${{ steps.version.outputs.version_id }}
+          BUILD_ID: ${{ steps.build.outputs.build_id }}
+        run: |
+          asc versions attach-build --version-id "$VERSION_ID" --build-id "$BUILD_ID"
+          # The report lists what App Review would still need. The submit step is the one that decides.
+          asc validate --app "$ASC_APP_ID" --version-id "$VERSION_ID" --platform MAC_OS --pretty \
+            || echo "::warning::asc validate reported problems. See the report above."
+
+      - name: Submit for review
+        id: submit
+        if: steps.plan.outputs.submit == 'true'
+        env:
+          VERSION_ID: ${{ steps.version.outputs.version_id }}
+          BUILD_ID: ${{ steps.build.outputs.build_id }}
+        run: |
+          asc review submit --app "$ASC_APP_ID" --platform MAC_OS \
+            --version-id "$VERSION_ID" --build-id "$BUILD_ID" --confirm --pretty
+
+      - name: Summary
+        if: always() && steps.plan.outcome == 'success'
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+          BUILD_NUMBER: ${{ steps.plan.outputs.build_number }}
+          SUBMIT: ${{ steps.plan.outputs.submit }}
+          EXISTS: ${{ steps.existing.outputs.exists }}
+          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
+          SUBMIT_OUTCOME: ${{ steps.submit.outcome }}
+        run: |
+          {
+            echo "### NameAlert $VERSION (build $BUILD_NUMBER)"
+            if [[ "$EXISTS" == "true" ]]; then
+              echo "- The build was already in App Store Connect, so nothing was built or uploaded."
+            else
+              echo "- Upload to App Store Connect: $UPLOAD_OUTCOME."
+            fi
+            if [[ "$SUBMIT" == "true" ]]; then
+              echo "- Submit for review: $SUBMIT_OUTCOME."
+            else
+              echo "- Not submitted for review. Tag the commit as v$VERSION, or run this workflow with submit ticked."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the keychain, profile and API key
+        if: always()
+        env:
+          PROFILE_UUID: ${{ steps.profile.outputs.uuid }}
+        run: |
+          keychain="$RUNNER_TEMP/namealert-signing.keychain-db"
+          if [[ -f "$keychain" ]]; then
+            security delete-keychain "$keychain" || echo "::warning::Could not delete the signing keychain."
+          fi
+          rm -f "$RUNNER_TEMP"/*.p12 "$RUNNER_TEMP"/*.provisionprofile "$RUNNER_TEMP/profile.plist"
+          rm -f "$RUNNER_TEMP"/AuthKey_*.p8 "$HOME/.appstoreconnect/private_keys"/AuthKey_*.p8
+          if [[ -n "${PROFILE_UUID:-}" ]]; then
+            rm -f "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$PROFILE_UUID.provisionprofile" \
+                  "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.provisionprofile"
+          fi

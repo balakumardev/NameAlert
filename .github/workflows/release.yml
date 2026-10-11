@@ -1,0 +1,303 @@
+name: Release
+
+# Builds the Developer ID DMG for a version tag, has Apple notarize it, and publishes it as a GitHub Release.
+#
+#   push of a v* tag   build, sign with Developer ID, notarize (up to 60 minutes) and staple the DMG,
+#                      then create the release with the DMG and its SHA-256
+#
+# The tag must be v<MARKETING_VERSION from project.yml>. The release notes are the whatsNew text from
+# appstore/asc/version/<version>/en-US.json plus the commits since the previous tag.
+#
+# Secrets: COOLSOLVE_CERT_P12, COOLSOLVE_CERT_PASSWORD, APP_STORE_CONNECT_API_KEY_P8,
+# APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID.
+# This workflow uses secrets, so it never runs on pull requests. A missing secret fails the run.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash -euo pipefail {0}
+
+jobs:
+  release:
+    name: Build, notarize and publish the DMG
+    runs-on: macos-26
+    timeout-minutes: 150
+    steps:
+      - name: Select the newest Xcode (26 or later)
+        env:
+          XCODE_MIN_MAJOR: '26'
+        run: |
+          # Picks the highest Xcode in /Applications whose version is at least XCODE_MIN_MAJOR.
+          # Betas are skipped: a release should not be built with one.
+          best_key=0
+          best_app=""
+          best_version=""
+          seen=""
+          version_re='^[0-9]+(\.[0-9]+){0,2}$'
+          for app in /Applications/Xcode*.app; do
+            [[ -f "$app/Contents/version.plist" ]] || continue
+            real="$(cd -P "$app" && pwd)"
+            version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$real/Contents/version.plist" 2>/dev/null || true)"
+            seen="$seen $(basename "$real")($version)"
+            [[ "$version" =~ $version_re ]] || continue
+            IFS=. read -r major minor patch <<<"$version"
+            (( major >= XCODE_MIN_MAJOR )) || continue
+            case "$(basename "$real")" in
+              *[Bb]eta*) continue ;;
+            esac
+            key=$(( major * 1000000 + ${minor:-0} * 1000 + ${patch:-0} ))
+            if (( key > best_key )); then
+              best_key=$key
+              best_app=$real
+              best_version=$version
+            fi
+          done
+          if [[ -z "$best_app" ]]; then
+            echo "::error::No Xcode $XCODE_MIN_MAJOR or later (not a beta) on this runner image (found:${seen:- none})."
+            exit 1
+          fi
+          echo "Using $best_app (Xcode $best_version)"
+          sudo xcode-select -s "$best_app/Contents/Developer"
+          xcodebuild -version
+
+      - name: Check out the code
+        uses: actions/checkout@v4
+        with:
+          # The build number is the commit count, and the notes list commits since the previous tag.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Work out the version and the build number
+        id: plan
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(grep -E 'MARKETING_VERSION:' project.yml | head -1 | sed -E 's/.*MARKETING_VERSION:[[:space:]]*"?([0-9][0-9.]*)"?.*/\1/')"
+          version_re='^[0-9]+(\.[0-9]+){0,2}$'
+          if ! [[ "$version" =~ $version_re ]]; then
+            echo "::error::Could not read MARKETING_VERSION from project.yml (got '$version')."
+            exit 1
+          fi
+          if [[ "$TAG" != "v$version" ]]; then
+            echo "::error::The tag $TAG does not match MARKETING_VERSION $version in project.yml (expected v$version)."
+            exit 1
+          fi
+          if [[ "$(git rev-parse --is-shallow-repository)" == "true" ]]; then
+            echo "::error::The checkout is shallow, so the commit count would be wrong."
+            exit 1
+          fi
+          build_number="$(git rev-list --count HEAD)"
+          {
+            echo "version=$version"
+            echo "build_number=$build_number"
+          } >> "$GITHUB_OUTPUT"
+          echo "NameAlert $version, build $build_number"
+
+      - name: Check that every secret is set
+        env:
+          COOLSOLVE_CERT_P12: ${{ secrets.COOLSOLVE_CERT_P12 }}
+          COOLSOLVE_CERT_PASSWORD: ${{ secrets.COOLSOLVE_CERT_PASSWORD }}
+          APP_STORE_CONNECT_API_KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          missing=0
+          for name in COOLSOLVE_CERT_P12 COOLSOLVE_CERT_PASSWORD \
+                      APP_STORE_CONNECT_API_KEY_P8 APP_STORE_CONNECT_KEY_ID APP_STORE_CONNECT_ISSUER_ID; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::missing secret: $name"
+              missing=1
+            fi
+          done
+          if [[ $missing -ne 0 ]]; then
+            echo "::error::Add the missing secrets under Settings > Secrets and variables > Actions, then run this workflow again."
+            exit 1
+          fi
+
+      - name: Install xcodegen and jq
+        env:
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+          HOMEBREW_NO_ENV_HINTS: '1'
+        run: |
+          for tool in xcodegen jq; do
+            command -v "$tool" >/dev/null || brew install "$tool"
+          done
+
+      - name: Generate the Xcode project
+        run: xcodegen generate
+
+      - name: Import the Developer ID certificate
+        id: signing
+        env:
+          COOLSOLVE_CERT_P12: ${{ secrets.COOLSOLVE_CERT_P12 }}
+          COOLSOLVE_CERT_PASSWORD: ${{ secrets.COOLSOLVE_CERT_PASSWORD }}
+        run: |
+          umask 077
+          keychain="$RUNNER_TEMP/namealert-signing.keychain-db"
+          keychain_password="$(openssl rand -base64 24)"
+          p12="$RUNNER_TEMP/developer-id.p12"
+
+          if ! printf '%s' "$COOLSOLVE_CERT_P12" | base64 --decode > "$p12"; then
+            echo "::error::COOLSOLVE_CERT_P12 is not valid base64."
+            exit 1
+          fi
+
+          # A keychain that exists only for this job. The cleanup step deletes it.
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$p12" -k "$keychain" -P "$COOLSOLVE_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
+          rm -f "$p12"
+
+          # codesign only looks in keychains on the search list.
+          existing_keychains="$(security list-keychains -d user | tr -d '"')"
+          # shellcheck disable=SC2086
+          security list-keychains -d user -s "$keychain" $existing_keychains
+
+          # By SHA-1, because names can match more than one certificate.
+          developer_id="$(security find-identity -v -p codesigning "$keychain" \
+            | awk '/"Developer ID Application: .*\(KHD36T7C97\)"/ && !found { id = $2; found = 1 } END { print id }')"
+          if [[ -z "$developer_id" ]]; then
+            echo "::error::COOLSOLVE_CERT_P12 has no valid Developer ID Application identity for team KHD36T7C97. Identities in it:"
+            security find-identity -p codesigning "$keychain" || true
+            exit 1
+          fi
+
+          {
+            echo "keychain=$keychain"
+            echo "developer_id=$developer_id"
+          } >> "$GITHUB_OUTPUT"
+          echo "Signing with Developer ID Application $developer_id"
+
+      - name: Put the App Store Connect API key in place
+        env:
+          KEY_P8: ${{ secrets.APP_STORE_CONNECT_API_KEY_P8 }}
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          umask 077
+          # A secret set from a file can carry a trailing newline.
+          KEY_ID="$(printf '%s' "$KEY_ID" | tr -d '[:space:]')"
+          ISSUER_ID="$(printf '%s' "$ISSUER_ID" | tr -d '[:space:]')"
+          if ! [[ "$KEY_ID" =~ ^[A-Za-z0-9]{10}$ ]]; then
+            echo "::error::APP_STORE_CONNECT_KEY_ID should be the 10-character key ID."
+            exit 1
+          fi
+          if ! [[ "$ISSUER_ID" =~ ^[0-9A-Fa-f-]{36}$ ]]; then
+            echo "::error::APP_STORE_CONNECT_ISSUER_ID should be the issuer UUID."
+            exit 1
+          fi
+          key="$RUNNER_TEMP/AuthKey_${KEY_ID}.p8"
+          # The secret holds the .p8 as base64. A plain PEM is accepted too.
+          if ! printf '%s' "$KEY_P8" | base64 --decode > "$key" 2>/dev/null || ! grep -q 'BEGIN PRIVATE KEY' "$key"; then
+            printf '%s\n' "$KEY_P8" > "$key"
+          fi
+          if ! grep -q 'BEGIN PRIVATE KEY' "$key"; then
+            rm -f "$key"
+            echo "::error::APP_STORE_CONNECT_API_KEY_P8 is not a .p8 private key (plain or base64)."
+            exit 1
+          fi
+          chmod 600 "$key"
+          # Also in the usual place, in case the script looks there instead of at ASC_KEY_PATH.
+          mkdir -p "$HOME/.appstoreconnect/private_keys"
+          cp "$key" "$HOME/.appstoreconnect/private_keys/AuthKey_${KEY_ID}.p8"
+          # scripts/build_dmg.sh passes these to notarytool.
+          {
+            echo "ASC_KEY_ID=$KEY_ID"
+            echo "ASC_ISSUER_ID=$ISSUER_ID"
+            echo "ASC_KEY_PATH=$key"
+          } >> "$GITHUB_ENV"
+
+      - name: Build, sign, notarize and staple the DMG
+        env:
+          BUILD_NUMBER: ${{ steps.plan.outputs.build_number }}
+          APPLE_BUILD_KEYCHAIN: ${{ steps.signing.outputs.keychain }}
+          DEVELOPER_ID_SHA1: ${{ steps.signing.outputs.developer_id }}
+        run: bash scripts/build_dmg.sh
+
+      - name: Check that the DMG is signed, notarized and stapled
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          dmg="dist/NameAlert-$VERSION.dmg"
+          if [[ ! -f "$dmg" ]]; then
+            echo "::error::scripts/build_dmg.sh finished without making $dmg."
+            exit 1
+          fi
+          # Fail here, not on a user's Mac, if the script skipped notarization.
+          xcrun stapler validate "$dmg"
+          spctl -a -t open --context context:primary-signature -vv "$dmg"
+
+      - name: Write the SHA-256 and the release notes
+        id: notes
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          (
+            cd dist
+            shasum -a 256 "NameAlert-$VERSION.dmg" > "NameAlert-$VERSION.dmg.sha256"
+            shasum -a 256 -c "NameAlert-$VERSION.dmg.sha256"
+          )
+
+          notes="$RUNNER_TEMP/release-notes.md"
+          metadata="appstore/asc/version/$VERSION/en-US.json"
+          whats_new=""
+          if [[ -f "$metadata" ]]; then
+            whats_new="$(jq -r '.whatsNew // empty' "$metadata")"
+          fi
+          if [[ -z "$whats_new" ]]; then
+            echo "::warning::$metadata has no whatsNew text, so the release notes list only the commits."
+          fi
+          previous_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^ 2>/dev/null || true)"
+          {
+            if [[ -n "$whats_new" ]]; then
+              printf '%s\n\n' "$whats_new"
+            fi
+            if [[ -n "$previous_tag" ]]; then
+              printf 'Changes since %s:\n\n' "$previous_tag"
+              git log --oneline "$previous_tag..HEAD" | sed 's/^/- /'
+            else
+              printf 'Changes:\n\n'
+              git log --oneline -n 100 HEAD | sed 's/^/- /'
+            fi
+          } > "$notes"
+          echo "notes=$notes" >> "$GITHUB_OUTPUT"
+          cat "$notes"
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          NOTES: ${{ steps.notes.outputs.notes }}
+        run: |
+          dmg="dist/NameAlert-$VERSION.dmg"
+          sha="$dmg.sha256"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            # A re-run: replace the files and the notes of the release that is already there.
+            gh release upload "$TAG" "$dmg" "$sha" --clobber
+            gh release edit "$TAG" --title "NameAlert $VERSION" --notes-file "$NOTES"
+          else
+            gh release create "$TAG" "$dmg" "$sha" --title "NameAlert $VERSION" --notes-file "$NOTES" --verify-tag
+          fi
+
+      - name: Remove the keychain and API key
+        if: always()
+        run: |
+          keychain="$RUNNER_TEMP/namealert-signing.keychain-db"
+          if [[ -f "$keychain" ]]; then
+            security delete-keychain "$keychain" || echo "::warning::Could not delete the signing keychain."
+          fi
+          rm -f "$RUNNER_TEMP"/*.p12 "$RUNNER_TEMP"/AuthKey_*.p8 "$HOME/.appstoreconnect/private_keys"/AuthKey_*.p8
