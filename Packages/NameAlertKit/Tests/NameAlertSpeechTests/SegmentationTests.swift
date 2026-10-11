@@ -144,6 +144,18 @@ struct SegmentationTests {
         #expect(heardFaint.allSatisfy { $0 == 0.9 })
     }
 
+    @Test func energyVADFloorStopsAtMinus90() throws {
+        // Digital silence (exact zeros, which ScreenCaptureKit delivers while nothing plays) measures -180 dBFS. A
+        // floor that followed it down would take 220 frames (7 s) to creep back up past -60 dBFS noise, which would
+        // count as speech all that time. Held at -90 dBFS, the floor climbs the 20 dB to -70 in 40 frames (1.3 s).
+        var vad = EnergyVAD()
+        _ = probabilities(&vad, for: silentFrame, count: 100)
+        let heard = probabilities(&vad, for: noiseFrame(rms: rms(dBFS: -60)), count: 60)
+        let firstQuiet = try #require(heard.firstIndex(of: 0.1), "the noise still counts as speech after 60 frames")
+        #expect(firstQuiet <= 40)
+        #expect(heard[firstQuiet...].allSatisfy { $0 == 0.1 })
+    }
+
     // MARK: Segmenter edges
 
     @Test func preRollOnlyHoldsAudioSinceThePreviousSegment() {

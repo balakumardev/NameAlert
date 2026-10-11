@@ -3,13 +3,17 @@ import Foundation
 /// A simple speech detector, for when the Silero model cannot be loaded.
 ///
 /// A frame counts as speech when it is clearly louder than the background noise. The noise level is learned as the
-/// frames arrive: it starts at -60 dBFS, drops at once to any quieter frame, and otherwise creeps up by 0.5 dB per
-/// frame. So it works the same on a quiet microphone as in a noisy room.
+/// frames arrive: it starts at -60 dBFS, drops at once to any quieter frame (but never below -90 dBFS), and otherwise
+/// creeps up by 0.5 dB per frame. So it works the same on a quiet microphone as in a noisy room.
 public struct EnergyVAD: Sendable {
     /// How far above the noise level a frame has to be to count as speech.
     private static let marginDB = 10.0
     /// How much the noise level may rise per frame.
     private static let riseDB = 0.5
+    /// The lowest the noise level goes. Digital silence (exact zeros, which ScreenCaptureKit delivers while nothing
+    /// plays) measures -180 dBFS. A noise level that followed it down would take seconds to creep back up, and any
+    /// ordinary noise would count as speech until it had.
+    private static let lowestFloorDB = -90.0
 
     private var noiseFloorDB = -60.0
 
@@ -23,7 +27,7 @@ public struct EnergyVAD: Sendable {
         let level = 20 * log10(rms + 1e-9)  // dBFS: 0 is full scale
 
         if level < noiseFloorDB {
-            noiseFloorDB = level
+            noiseFloorDB = max(level, Self.lowestFloorDB)
         } else {
             noiseFloorDB += Self.riseDB
         }
