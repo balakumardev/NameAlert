@@ -1,5 +1,57 @@
 import CoreAudio
 import Foundation
+import NameAlertCore
+
+/// What one look at Core Audio's process list gave.
+struct ProcessListReading: Sendable, Equatable {
+    /// The processes that could be identified, recording or not.
+    var processes: [AudioProcessSnapshot]
+    /// How many process objects Core Audio listed. More than `processes.count` when some could not be read.
+    var objectCount: Int
+    /// The status Core Audio answered with when it would not hand over the list, or `nil` when it did.
+    var failure: OSStatus?
+
+    init(processes: [AudioProcessSnapshot], objectCount: Int? = nil, failure: OSStatus? = nil) {
+        self.processes = processes
+        self.objectCount = objectCount ?? processes.count
+        self.failure = failure
+    }
+}
+
+/// Works out what the call detector tells the log, so that a stream does not say the same thing every second: how
+/// many processes there are, once when the stream starts, and why the list could not be read, once for each reason
+/// until a read works again. An entry holds counts and a status, never the name or the ID of a process, so that which
+/// apps are recording stays out of the log.
+struct ProcessListLogbook {
+    enum Entry: Equatable {
+        case started(processObjects: Int, recordingInput: Int)
+        case unreadable(OSStatus)
+    }
+
+    private var started = false
+    private var reportedFailure: OSStatus?
+
+    /// What to log for the next look at the list, which is nothing most of the time.
+    mutating func entries(for reading: ProcessListReading) -> [Entry] {
+        var entries: [Entry] = []
+        if !started {
+            started = true
+            entries.append(
+                .started(
+                    processObjects: reading.objectCount,
+                    recordingInput: reading.processes.filter(\.isRunningInput).count))
+        }
+        if let status = reading.failure {
+            if status != reportedFailure {
+                reportedFailure = status
+                entries.append(.unreadable(status))
+            }
+        } else {
+            reportedFailure = nil
+        }
+        return entries
+    }
+}
 
 /// Watches for calls: moments when another app is recording from the microphone.
 ///
@@ -9,6 +61,8 @@ import Foundation
 ///
 /// What counts as a call is decided by `CallDetectionLogic`. This type looks at the list every `pollInterval` and
 /// passes the changes on.
+///
+/// What it sees is written to the log (category "calls") as counts and statuses only; see `states()`.
 public actor CallDetector {
     /// Everything a stream needs, so that it does not have to come back to the actor while it polls.
     private struct Settings: Sendable {
@@ -17,8 +71,10 @@ public actor CallDetector {
         let ownBundleID: String
         let browserDelay: TimeInterval
         let grace: TimeInterval
-        let processes: @Sendable () -> [AudioProcessSnapshot]
+        let reading: @Sendable () -> ProcessListReading
     }
+
+    private static let log = Log.logger("calls")
 
     private let settings: Settings
 
@@ -32,17 +88,17 @@ public actor CallDetector {
         self.init(
             pollInterval: pollInterval, ownPID: ProcessInfo.processInfo.processIdentifier,
             ownBundleID: Bundle.main.bundleIdentifier ?? "dev.balakumar.namealert",
-            processes: { CallDetector.currentProcesses() })
+            reading: { CallDetector.currentReading() })
     }
 
-    /// For tests: `processes` stands in for the real list, and the browser delay and the grace can be set.
+    /// For tests: `reading` stands in for Core Audio, and the browser delay and the grace can be set.
     init(
         pollInterval: Duration, ownPID: Int32, ownBundleID: String, browserDelay: TimeInterval = 3,
-        grace: TimeInterval = 8, processes: @escaping @Sendable () -> [AudioProcessSnapshot]
+        grace: TimeInterval = 8, reading: @escaping @Sendable () -> ProcessListReading
     ) {
         settings = Settings(
             pollInterval: pollInterval, ownPID: ownPID, ownBundleID: ownBundleID, browserDelay: browserDelay,
-            grace: grace, processes: processes)
+            grace: grace, reading: reading)
     }
 
     /// The state of the call now, and then every time it changes. The first state is always delivered.
@@ -50,7 +106,14 @@ public actor CallDetector {
     /// Each stream looks at the processes on its own, starting from nothing seen, so it needs a few seconds of
     /// looking before it can say a browser has been recording long enough. Polling stops when the stream is cancelled
     /// or no longer read.
-    public func states() -> AsyncStream<CallState> {
+    ///
+    /// Each stream writes one line to the log when it starts: how many audio processes Core Audio lists and how many
+    /// of them are recording. That tells a list that comes back empty from a call that is simply not there. If Core
+    /// Audio refuses to hand over the list, the status it answered with is logged as an error, once for each status.
+    /// Only counts and statuses are logged, never which apps are recording.
+    ///
+    /// Not isolated to the actor: it reads nothing but the settings made in `init`, which never change.
+    public nonisolated func states() -> AsyncStream<CallState> {
         let (stream, continuation) = AsyncStream.makeStream(of: CallState.self)
         let settings = settings
         let polling = Task.detached(priority: .utility) {
@@ -64,9 +127,12 @@ public actor CallDetector {
         var logic = CallDetectionLogic(
             ownPID: settings.ownPID, ownBundleID: settings.ownBundleID, browserDelay: settings.browserDelay,
             grace: settings.grace)
+        var logbook = ProcessListLogbook()
         var last: CallState?
         while !Task.isCancelled {
-            let state = logic.update(processes: settings.processes(), now: Date())
+            let reading = settings.reading()
+            for entry in logbook.entries(for: reading) { write(entry) }
+            let state = logic.update(processes: reading.processes, now: Date())
             if state != last {
                 last = state
                 continuation.yield(state)
@@ -80,13 +146,34 @@ public actor CallDetector {
         continuation.finish()
     }
 
+    private static func write(_ entry: ProcessListLogbook.Entry) {
+        switch entry {
+        case .started(let processObjects, let recordingInput):
+            log.info("""
+                Watching for calls: \(processObjects, privacy: .public) audio processes, \
+                \(recordingInput, privacy: .public) recording input
+                """)
+        case .unreadable(let status):
+            log.error("""
+                Could not read the audio process list (OSStatus \(status, privacy: .public)). \
+                Calls cannot be seen while this lasts.
+                """)
+        }
+    }
+
     /// The processes connected to Core Audio right now, recording or not, as they are listed. Empty before macOS 14.2,
     /// or when Core Audio does not answer.
     public static func currentProcesses() -> [AudioProcessSnapshot] {
+        currentReading().processes
+    }
+
+    /// `currentProcesses()` with what else Core Audio said: how many process objects there were, and the status of the
+    /// call that failed if the list could not be read.
+    static func currentReading() -> ProcessListReading {
         if #available(macOS 14.2, *) {
-            return CoreAudioProcessList.snapshots()
+            return CoreAudioProcessList.read()
         }
-        return []
+        return ProcessListReading(processes: [])
     }
 }
 
@@ -96,13 +183,15 @@ public actor CallDetector {
 /// when a process exits while it is read; then that process, or just that detail of it, is left out.
 @available(macOS 14.2, *)
 private enum CoreAudioProcessList {
-    static func snapshots() -> [AudioProcessSnapshot] {
-        processObjects().compactMap { object in
+    static func read() -> ProcessListReading {
+        let (objects, failure) = processObjects()
+        let processes = objects.compactMap { object -> AudioProcessSnapshot? in
             // A process without a process ID cannot be told from another, or from ourselves.
             guard let pid: Int32 = integer(kAudioProcessPropertyPID, of: object), pid > 0 else { return nil }
             let isRunningInput: UInt32 = integer(kAudioProcessPropertyIsRunningInput, of: object) ?? 0
             return AudioProcessSnapshot(pid: pid, bundleID: bundleID(of: object), isRunningInput: isRunningInput != 0)
         }
+        return ProcessListReading(processes: processes, objectCount: objects.count, failure: failure)
     }
 
     private static func propertyAddress(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
@@ -111,24 +200,28 @@ private enum CoreAudioProcessList {
     }
 
     /// The process objects Core Audio knows. The list can change between asking how long it is and reading it; a
-    /// read that no longer fits is simply made again.
-    private static func processObjects() -> [AudioObjectID] {
+    /// read that no longer fits is simply made again. When Core Audio will not hand the list over, there are no
+    /// objects and the status of the call that failed comes with them (the last one, if the read was tried again).
+    private static func processObjects() -> (objects: [AudioObjectID], failure: OSStatus?) {
         let system = AudioObjectID(kAudioObjectSystemObject)
         var address = propertyAddress(kAudioHardwarePropertyProcessObjectList)
         let stride = MemoryLayout<AudioObjectID>.stride
+        var failure: OSStatus?
         for _ in 0..<3 {
             var size: UInt32 = 0
-            guard AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size) == noErr, Int(size) >= stride
-            else { return [] }
+            let sizeStatus = AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size)
+            guard sizeStatus == noErr else { return ([], sizeStatus) }
+            guard Int(size) >= stride else { return ([], nil) }  // no process is connected: not a failure
             var objects = [AudioObjectID](repeating: AudioObjectID(kAudioObjectUnknown), count: Int(size) / stride)
             let status = objects.withUnsafeMutableBytes { buffer in
                 AudioObjectGetPropertyData(system, &address, 0, nil, &size, buffer.baseAddress!)
             }
             if status == noErr {
-                return Array(objects.prefix(Int(size) / stride))  // `size` is what was really returned
+                return (Array(objects.prefix(Int(size) / stride)), nil)  // `size` is what was really returned
             }
+            failure = status
         }
-        return []
+        return ([], failure)
     }
 
     /// A number property, such as the process ID (`pid_t`) or a flag (`UInt32`).

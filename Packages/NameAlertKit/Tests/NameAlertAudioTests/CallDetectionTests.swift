@@ -241,7 +241,7 @@ private func makeDetector(_ script: ScriptedProcesses) -> CallDetector {
     // No grace, so that a call that is gone is reported as soon as it is seen to be gone.
     CallDetector(
         pollInterval: .milliseconds(5), ownPID: ownPID, ownBundleID: ownBundleID, grace: 0,
-        processes: { script.next() })
+        reading: { ProcessListReading(processes: script.next()) })
 }
 
 @Suite("CallDetection stream", .timeLimit(.minutes(1)))
@@ -249,7 +249,7 @@ struct CallDetectionStreamTests {
     @Test func theFirstStateIsYieldedAndThenOnlyChanges() async {
         let script = ScriptedProcesses([[], [], zoom, zoom, zoom, []])
         var seen: [CallState] = []
-        for await state in await makeDetector(script).states() {
+        for await state in makeDetector(script).states() {
             seen.append(state)
             if seen.count == 3 { break }
         }
@@ -261,7 +261,7 @@ struct CallDetectionStreamTests {
         let detector = makeDetector(script)
         for _ in 1...2 {
             var first: CallState?
-            for await state in await detector.states() {
+            for await state in detector.states() {
                 first = state
                 break
             }
@@ -272,7 +272,7 @@ struct CallDetectionStreamTests {
     @Test func cancellingTheConsumerStopsPolling() async throws {
         let script = ScriptedProcesses([[]])
         let consumer = Task {
-            for await _ in await makeDetector(script).states() {}
+            for await _ in makeDetector(script).states() {}
         }
         for _ in 1...400 where script.pollCount < 3 { try await Task.sleep(for: .milliseconds(5)) }
         try #require(script.pollCount >= 3, "polling never started")
@@ -284,5 +284,49 @@ struct CallDetectionStreamTests {
         try await Task.sleep(for: .milliseconds(150))  // thirty more polls, if it were still going
 
         #expect(script.pollCount == settled)
+    }
+}
+
+// MARK: - The log
+
+/// What the detector tells the log is worked out here, so that it can be tested without reading the log. An entry holds
+/// counts and a status, never which app is recording.
+@Suite("CallDetection log")
+struct CallDetectionLogTests {
+    private let unreadable: OSStatus = -50
+
+    @Test func theStartSaysHowManyProcessesThereAreAndHowManyRecordAndOnlyOnce() {
+        var logbook = ProcessListLogbook()
+        let processes = [
+            recording(200, "us.zoom.xos"),
+            AudioProcessSnapshot(pid: 201, bundleID: "com.example.player", isRunningInput: false),
+            recording(202, nil),
+        ]
+        // Four process objects, one of which could not be identified.
+        let reading = ProcessListReading(processes: processes, objectCount: 4)
+        #expect(logbook.entries(for: reading) == [.started(processObjects: 4, recordingInput: 2)])
+        #expect(logbook.entries(for: reading).isEmpty)
+    }
+
+    @Test func withoutAnObjectCountTheProcessesAreTheCount() {
+        var logbook = ProcessListLogbook()
+        let reading = ProcessListReading(processes: zoom + chrome)
+        #expect(logbook.entries(for: reading) == [.started(processObjects: 2, recordingInput: 2)])
+    }
+
+    @Test func aListThatCannotBeReadIsReportedOnceForEachReasonUntilItReadsAgain() {
+        var logbook = ProcessListLogbook()
+        let failed = ProcessListReading(processes: [], failure: unreadable)
+        // The start is reported as well, with nothing counted.
+        #expect(logbook.entries(for: failed) == [.started(processObjects: 0, recordingInput: 0), .unreadable(-50)])
+        #expect(logbook.entries(for: failed).isEmpty)
+        #expect(logbook.entries(for: failed).isEmpty)
+
+        // Another reason is news.
+        #expect(logbook.entries(for: ProcessListReading(processes: [], failure: -1)) == [.unreadable(-1)])
+
+        // Once the list reads again, the next failure is reported afresh.
+        #expect(logbook.entries(for: ProcessListReading(processes: zoom)).isEmpty)
+        #expect(logbook.entries(for: failed) == [.unreadable(-50)])
     }
 }
