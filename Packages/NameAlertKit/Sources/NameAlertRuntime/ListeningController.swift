@@ -1108,8 +1108,8 @@ public final class ListeningController {
     /// How long the local model must keep up before its falling-behind warning goes away by itself.
     static let fallingBehindQuietPeriod: Duration = .seconds(120)
     static let longestSnoozeMinutes = 7 * 24 * 60
-    /// About 5 s of audio waits for an engine that falls behind; older chunks are dropped.
-    static let bufferedChunks = 50
+    /// How many chunks (100 ms each) wait for the engine: 60 s rides out a slow start for at most ~3.8 MB.
+    static let bufferedChunks = 600
     /// The rule ID of a test alert when there is no rule ("NAMEALERTTEST").
     static let testRuleID = UUID(uuid: (0x4E, 0x41, 0x4D, 0x45, 0x41, 0x4C, 0x45, 0x52, 0x54, 0x54, 0x45, 0x53, 0x54, 0, 0, 0))
     static let stoppedCapture = "Audio capture stopped unexpectedly."
