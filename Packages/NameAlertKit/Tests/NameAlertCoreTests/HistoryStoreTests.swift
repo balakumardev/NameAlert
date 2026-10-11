@@ -25,8 +25,8 @@ struct HistoryStoreTests {
 
     /// A hit that differs from every other `makeHit` result: its own id, texts, source and engine.
     ///
-    /// The timestamp is a whole second unless `timestamp` says otherwise. The file keeps whole seconds only (see
-    /// `timestampsAreKeptToTheSecond`), so a hit that went through the file compares equal to the one that was stored.
+    /// The timestamp is a whole second unless `timestamp` says otherwise. A hit read back from the file compares
+    /// equal to the one that was stored as long as its timestamp is a whole number of milliseconds.
     private func makeHit(_ number: Int, timestamp: Date? = nil) -> Hit {
         Hit(
             ruleID: UUID(), ruleName: "Rule \(number)", term: "term \(number)", matchedText: "matched \(number)",
@@ -38,11 +38,21 @@ struct HistoryStoreTests {
         )
     }
 
-    /// What is on disk right now, decoded without going through a store.
+    /// What is on disk right now, decoded without going through a store instance.
     private func readHistory(at url: URL) throws -> [Hit] {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode([Hit].self, from: Data(contentsOf: url))
+        try HistoryStore.decodeHits(from: Data(contentsOf: url)).hits
+    }
+
+    /// The JSON object the store writes for `hit`, to build files by hand.
+    private func entry(for hit: Hit) throws -> [String: Any] {
+        let object = try JSONSerialization.jsonObject(with: HistoryStore.encode([hit]))
+        let list = try #require(object as? [[String: Any]])
+        return try #require(list.first)
+    }
+
+    /// A history file holding `entries`, in that order.
+    private func fileData(_ entries: [Any]) throws -> Data {
+        try JSONSerialization.data(withJSONObject: entries, options: .sortedKeys)
     }
 
     /// The file system's number for the file at `url`; a different number means a different file.
@@ -275,6 +285,119 @@ struct HistoryStoreTests {
             let besideAfter = try FileManager.default.contentsOfDirectory(atPath: directory.path)
             #expect(besideAfter == ["history.json"])
         }
+    }
+
+    @Test func badHistoryElementIsSkipped() async throws {
+        try await inTemporaryDirectory { directory in
+            let file = directory.appendingPathComponent("history.json")
+            let valid1 = makeHit(1)
+            let valid2 = makeHit(2)
+
+            // A real file, written by a store and then edited into what a newer app version could leave behind: an
+            // entry that is no hit at all, and a hit with an engine this version has never heard of.
+            let writer = HistoryStore(fileURL: file, debounce: neverByItself)
+            await writer.append(valid2)
+            await writer.append(valid1)
+            await writer.flush()
+            let written = try JSONSerialization.jsonObject(with: Data(contentsOf: file))
+            let entries = try #require(written as? [[String: Any]])
+            try #require(entries.count == 2)
+            var futureEngine = entries[0]
+            futureEngine["engine"] = "futureEngine"
+            let edited: [Any] = [entries[0], ["garbage": true], futureEngine, entries[1]]
+            let editedData = try JSONSerialization.data(withJSONObject: edited)
+            try editedData.write(to: file)
+
+            // The two bad entries are skipped and the two good ones stay, in order.
+            let store = HistoryStore(fileURL: file, debounce: neverByItself)
+            let loaded = await store.load()
+            #expect(loaded == [valid1, valid2])
+            let afterLoad = try Data(contentsOf: file)
+            #expect(afterLoad == editedData)  // reading never rewrites the file
+
+            // The next write is the first time the skipped entries leave the file.
+            let valid3 = makeHit(3)
+            await store.append(valid3)
+            await store.flush()
+            let onDisk = try readHistory(at: file)
+            #expect(onDisk == [valid3, valid1, valid2])
+        }
+    }
+
+    /// Ways one entry of the list can be unreadable. A newer version that writes a value this one does not know
+    /// (`unknownEngine`, `unknownSource`) is the realistic one; the rest is hand edits and damage.
+    enum BadEntry: String, CaseIterable, CustomTestStringConvertible {
+        case null, number, text, emptyList, emptyObject, unrelatedObject
+        case unknownEngine, unknownSource, notAUUID, notADate, dateAsNumber, missingContext, contextNotText
+
+        var testDescription: String { rawValue }
+
+        /// `valid` broken in this way, or just the broken value for entries that are not a hit at all.
+        func make(from valid: [String: Any]) -> Any {
+            var broken = valid
+            switch self {
+            case .null: return NSNull()
+            case .number: return 42
+            case .text: return "text"
+            case .emptyList: return [Any]()
+            case .emptyObject: return [String: Any]()
+            case .unrelatedObject: return ["garbage": true]
+            case .unknownEngine: broken["engine"] = "futureEngine"
+            case .unknownSource: broken["source"] = "futureSource"
+            case .notAUUID: broken["id"] = "not-a-uuid"
+            case .notADate: broken["timestamp"] = "yesterday"
+            case .dateAsNumber: broken["timestamp"] = 781_867_800.123
+            case .missingContext: broken["context"] = nil
+            case .contextNotText: broken["context"] = 42
+            }
+            return broken
+        }
+    }
+
+    @Test(arguments: BadEntry.allCases)
+    func everyKindOfBadEntryIsSkipped(bad: BadEntry) async throws {
+        try await inTemporaryDirectory { directory in
+            let file = directory.appendingPathComponent("history.json")
+            let valid1 = makeHit(1)
+            let valid2 = makeHit(2)
+            let good1 = try entry(for: valid1)
+            let good2 = try entry(for: valid2)
+            // The bad entry starts from a copy of the first hit, so it would show up as a duplicate if it loaded.
+            let data = try fileData([good1, bad.make(from: good1), good2])
+            try data.write(to: file)
+
+            let store = HistoryStore(fileURL: file, debounce: neverByItself)
+            let loaded = await store.load()
+            #expect(loaded == [valid1, valid2])
+            let decoded = try HistoryStore.decodeHits(from: data)
+            #expect(decoded.skipped == 1)
+        }
+    }
+
+    @Test func skippedEntriesAreCounted() throws {
+        let h1 = makeHit(1)
+        let h2 = makeHit(2)
+        let good1 = try entry(for: h1)
+        let good2 = try entry(for: h2)
+
+        let clean = try HistoryStore.decodeHits(from: fileData([good1, good2]))
+        #expect(clean.hits == [h1, h2])
+        #expect(clean.skipped == 0)
+
+        let empty = try HistoryStore.decodeHits(from: fileData([]))
+        #expect(empty.hits.isEmpty)
+        #expect(empty.skipped == 0)
+
+        let mixed = try HistoryStore.decodeHits(from: fileData([NSNull(), good1, ["garbage": true], 7, good2]))
+        #expect(mixed.hits == [h1, h2])
+        #expect(mixed.skipped == 3)
+
+        let allBad = try HistoryStore.decodeHits(from: Data("[1, 2, 3]".utf8))
+        #expect(allBad.hits.isEmpty)
+        #expect(allBad.skipped == 3)
+
+        // Not a list at all is damage to the whole file, not to an entry, and it still throws.
+        #expect(throws: (any Error).self) { try HistoryStore.decodeHits(from: Data(#"{"hits":[]}"#.utf8)) }
     }
 
     @Test(.enabled(if: getuid() != 0, "root can read any file"))
@@ -539,7 +662,7 @@ struct HistoryStoreTests {
             #expect(text.hasPrefix(#"[{"context":"#))  // a list of objects, written compactly
             #expect(text.hasSuffix("}]"))
             #expect(!text.contains("\n"))
-            #expect(text.contains(#""timestamp":"2023-11-14T22:13:21Z""#))
+            #expect(text.contains(#""timestamp":"2023-11-14T22:13:21.000Z""#))  // UTC, always three fraction digits
             let keys = [
                 "context", "engine", "id", "matchedText", "ruleID", "ruleName", "segmentID", "source", "term",
                 "timestamp",
@@ -554,23 +677,122 @@ struct HistoryStoreTests {
         }
     }
 
-    @Test func timestampsAreKeptToTheSecond() async throws {
+    @Test func fractionalTimestampsSurviveReload() async throws {
         try await inTemporaryDirectory { directory in
             let file = directory.appendingPathComponent("history.json")
-            let exact = Date(timeIntervalSince1970: 1_700_000_000.75)
-            let hit = makeHit(1, timestamp: exact)
+            let hit = makeHit(1, timestamp: Date(timeIntervalSince1970: 1_760_175_000.123))
             let store = HistoryStore(fileURL: file, debounce: neverByItself)
             await store.append(hit)
-            let inMemory = await store.all()
-            #expect(inMemory.first?.timestamp == exact)  // in memory the hit is exactly what was appended
             await store.flush()
 
-            // The ISO-8601 date strategy writes whole seconds, so a hit read back is up to a second earlier. The
-            // History window shows whole seconds, and nothing compares timestamps for equality.
+            // Through the file and back, the hit is equal to the one that was stored, to the last bit of the date.
             let reloaded = await HistoryStore(fileURL: file).load()
-            #expect(reloaded.map(\.timestamp) == [Date(timeIntervalSince1970: 1_700_000_000)])
-            #expect(reloaded.map(\.id) == [hit.id])
+            #expect(reloaded == [hit])
+            #expect(reloaded.first?.timestamp == hit.timestamp)
+            let text = String(decoding: try Data(contentsOf: file), as: UTF8.self)
+            #expect(text.contains(#""timestamp":"2025-10-11T09:30:00.123Z""#))
         }
+    }
+
+    @Test func wholeSecondTimestampsStillLoad() async throws {
+        try await inTemporaryDirectory { directory in
+            let file = directory.appendingPathComponent("history.json")
+            let h1 = makeHit(1)  // 2023-11-14 22:13:21 UTC
+            let h2 = makeHit(2)
+
+            // The form without a fraction, which is what this file held before milliseconds were added.
+            var first = try entry(for: h1)
+            var second = try entry(for: h2)
+            first["timestamp"] = "2023-11-14T22:13:21Z"
+            second["timestamp"] = "2023-11-14T22:13:22Z"
+            try fileData([first, second]).write(to: file)
+
+            let loaded = await HistoryStore(fileURL: file).load()
+            #expect(loaded == [h1, h2])
+        }
+    }
+
+    @Test func millisecondTimestampsRoundTripExactly() {
+        var generator = SeededGenerator(state: 1_760_175_000)
+        let oracle = ISO8601DateFormatter()  // whole seconds only, and exact on every macOS version
+        var wrongText: [String] = []
+        var wrongDate: [String] = []
+        for _ in 0..<20_000 {
+            // Any millisecond from 2000-01-01 to 2099-12-31.
+            let milliseconds = Int64.random(in: 946_684_800_000...4_102_444_799_999, using: &generator)
+            let date = Date(timeIntervalSince1970: Double(milliseconds) / 1000)
+
+            let text = HistoryTimestamp.string(from: date)
+            let wholeSecond = oracle.string(from: Date(timeIntervalSince1970: Double(milliseconds / 1000)))
+            let expected = String(wholeSecond.dropLast()) + String(format: ".%03d", Int(milliseconds % 1000)) + "Z"
+            if text != expected { wrongText.append("\(text) should be \(expected)") }
+            if HistoryTimestamp.date(from: text) != date { wrongDate.append(text) }
+        }
+        #expect(wrongText.isEmpty, "\(wrongText.prefix(3))")
+        #expect(wrongDate.isEmpty, "\(wrongDate.prefix(3))")
+    }
+
+    @Test func timestampsRoundToTheNearestMillisecond() {
+        let cases: [(seconds: Double, text: String)] = [
+            (1_760_175_000.1234, "2025-10-11T09:30:00.123Z"),
+            (1_760_175_000.1236, "2025-10-11T09:30:00.124Z"),
+            (1_760_175_000.9996, "2025-10-11T09:30:01.000Z"),  // rounds up into the next second ...
+            (1_760_175_059.9996, "2025-10-11T09:31:00.000Z"),  // ... and the next minute
+        ]
+        for (seconds, text) in cases {
+            #expect(HistoryTimestamp.string(from: Date(timeIntervalSince1970: seconds)) == text, "\(seconds)")
+        }
+    }
+
+    @Test func timestampsBeforeTheEpochKeepTheirFraction() {
+        // The fraction always counts forwards from the whole second, so -0.5 is 23:59:59.500 and not 00.500.
+        let cases: [(seconds: Double, text: String)] = [
+            (0, "1970-01-01T00:00:00.000Z"),
+            (-0.5, "1969-12-31T23:59:59.500Z"),
+            (-0.001, "1969-12-31T23:59:59.999Z"),
+            (-1.25, "1969-12-31T23:59:58.750Z"),
+        ]
+        for (seconds, text) in cases {
+            let date = Date(timeIntervalSince1970: seconds)
+            #expect(HistoryTimestamp.string(from: date) == text, "\(seconds)")
+            #expect(HistoryTimestamp.date(from: text) == date, "\(text)")
+        }
+    }
+
+    @Test func extremeTimestampsDoNotCrash() {
+        // None of these can come from a real clock, but writing the file must never trap on one.
+        let dates = [
+            Date.distantPast, Date.distantFuture,
+            Date(timeIntervalSince1970: .nan), Date(timeIntervalSince1970: .infinity),
+            Date(timeIntervalSince1970: -.infinity), Date(timeIntervalSince1970: 1e300),
+        ]
+        for date in dates {
+            let text = HistoryTimestamp.string(from: date)
+            #expect(text.count == 24, "\(text)")  // yyyy-MM-ddTHH:mm:ss.SSSZ
+            #expect(HistoryTimestamp.date(from: text) != nil, "\(text)")
+        }
+    }
+
+    @Test func timestampTextIsReadLeniently() {
+        let cases: [(text: String, seconds: Double)] = [
+            ("2025-10-11T09:30:00Z", 1_760_175_000),
+            ("2025-10-11T09:30:00.5Z", 1_760_175_000.5),
+            ("2025-10-11T09:30:00.123Z", 1_760_175_000.123),
+            ("2025-10-11T09:30:00.123456Z", 1_760_175_000.123456),
+            ("2025-10-11T09:30:00.1234567890Z", 1_760_175_000.123456),  // only the first six digits count
+        ]
+        for (text, seconds) in cases {
+            #expect(HistoryTimestamp.date(from: text) == Date(timeIntervalSince1970: seconds), "\(text)")
+        }
+    }
+
+    @Test(arguments: [
+        "", "yesterday", "2025-10-11", "1760175000",
+        "2025-10-11T09:30:00.Z",  // a dot with no digits after it
+        "2025-10-11T09:30:00.12.3Z",  // a second dot
+    ])
+    func unreadableTimestampTextIsRejected(text: String) {
+        #expect(HistoryTimestamp.date(from: text) == nil)
     }
 
     @Test func rewriteReplacesTheFileInsteadOfEditingItInPlace() async throws {
