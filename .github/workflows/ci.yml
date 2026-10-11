@@ -2,8 +2,11 @@ name: CI
 
 # Builds and tests NameAlert on GitHub-hosted runners. No secrets here, so it is safe on pull requests.
 #
-#   macos-26        swift test, then an unsigned universal Release build that must produce no warnings
-#                   in NameAlert/ or Packages/
+#   xcode-27        The build, on GitHub's preview image with Xcode 27: swift test, an unsigned universal Release
+#                   build that must produce no warnings in NameAlert/ or Packages/, and the Screenshots scheme
+#                   tests (every render and logic test of the app's views). It uses the newest Xcode that is not a
+#                   beta, which is the toolchain appstore.yml and release.yml ship with.
+#   macos-26        swift test with Xcode 26.x, so the package keeps building with the previous toolchain
 #   macos-15        swift test only, so the code paths for older macOS versions run too. If that image has no
 #                   Xcode 26 or later, the leg ends early and the job still passes.
 #   macos-26-intel  An x86_64 Mac, the only place the Intel slice of whisper.cpp runs: swift test, then the
@@ -35,27 +38,37 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-26
+          - os: xcode-27
             full: true
             optional: false
             whisper: false
+            beta: false
+          - os: macos-26
+            full: false
+            optional: false
+            whisper: false
+            beta: true
           - os: macos-15
             full: false
             optional: true
             whisper: false
+            beta: true
           - os: macos-26-intel
             full: false
             optional: false
             whisper: true
+            beta: true
     steps:
       - name: Select the newest Xcode (26 or later)
         id: xcode
         env:
           XCODE_MIN_MAJOR: '26'
           XCODE_SKIP_IF_MISSING: ${{ matrix.optional }}
+          XCODE_ALLOW_BETA: ${{ matrix.beta }}
         run: |
           # Picks the highest Xcode in /Applications whose version is at least XCODE_MIN_MAJOR.
-          # A beta is fine here: this workflow only builds and tests, it never uploads anything.
+          # A beta is fine on the compatibility legs: they only build and test, they never upload anything. The
+          # build leg skips betas, because it should build with what appstore.yml and release.yml ship with.
           best_key=0
           best_app=""
           best_version=""
@@ -69,6 +82,11 @@ jobs:
             [[ "$version" =~ $version_re ]] || continue
             IFS=. read -r major minor patch <<<"$version"
             (( major >= XCODE_MIN_MAJOR )) || continue
+            if [[ "$XCODE_ALLOW_BETA" != "true" ]]; then
+              case "$(basename "$real")" in
+                *[Bb]eta*) continue ;;
+              esac
+            fi
             key=$(( major * 1000000 + ${minor:-0} * 1000 + ${patch:-0} ))
             if (( key > best_key )); then
               best_key=$key
@@ -82,7 +100,7 @@ jobs:
               echo "skip=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            echo "::error::No Xcode $XCODE_MIN_MAJOR or later on this runner image (found:${seen:- none})."
+            echo "::error::No Xcode $XCODE_MIN_MAJOR or later (beta allowed: $XCODE_ALLOW_BETA) on this runner image (found:${seen:- none})."
             exit 1
           fi
           echo "Using $best_app (Xcode $best_version)"
@@ -127,9 +145,25 @@ jobs:
         # and the performance test is for scripts/verify.sh.
         run: swift test --package-path Packages/NameAlertKit --filter WhisperEngineTests
 
-      - name: Install XcodeGen
+      - name: Install XcodeGen 2.46.0
         if: steps.xcode.outputs.skip != 'true' && matrix.full
-        run: command -v xcodegen >/dev/null || brew install xcodegen
+        env:
+          XCODEGEN_VERSION: '2.46.0'
+          # The SHA-256 GitHub reports for xcodegen.zip in that release. appstore.yml and release.yml install the
+          # same version the same way: change all three together.
+          XCODEGEN_SHA256: '4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806'
+        run: |
+          zip="$RUNNER_TEMP/xcodegen.zip"
+          curl --fail --silent --show-error --location --retry 3 --output "$zip" \
+            "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
+          echo "$XCODEGEN_SHA256  $zip" | shasum -a 256 -c -
+          dir="$RUNNER_TEMP/xcodegen-$XCODEGEN_VERSION"
+          rm -rf "$dir"
+          mkdir -p "$dir"
+          unzip -q "$zip" -d "$dir"
+          # The zip holds xcodegen/bin/xcodegen and xcodegen/share/xcodegen/SettingPresets, which it finds by its own path.
+          echo "$dir/xcodegen/bin" >> "$GITHUB_PATH"
+          "$dir/xcodegen/bin/xcodegen" --version
 
       - name: Generate the Xcode project
         if: steps.xcode.outputs.skip != 'true' && matrix.full
@@ -149,13 +183,29 @@ jobs:
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             2>&1 | tee build/build.log
 
+      - name: Run the Screenshots scheme tests
+        if: steps.xcode.outputs.skip != 'true' && matrix.full
+        run: |
+          # Every render and logic test of the app's views, in the screenshot host (a Debug build of the app's sources
+          # without its @main). The views are drawn in offscreen windows, which the runner's login session allows.
+          # The renders go to build/renders; the store screenshots are only written by scripts/render_screenshots.sh.
+          xcodebuild test \
+            -project NameAlert.xcodeproj \
+            -scheme Screenshots \
+            -destination 'platform=macOS' \
+            -derivedDataPath build/DerivedData-tests \
+            -testLanguage en -testRegion US \
+            2>&1 | tee build/screenshots-tests.log
+
       - name: Fail on warnings in NameAlert/ and Packages/
         if: steps.xcode.outputs.skip != 'true' && matrix.full
         run: |
-          # Only warnings that point into our own sources count. Xcode's own messages, such as the
-          # appintentsmetadataprocessor ones, do not start with a path and are ignored.
-          if grep -E "^/.*/(NameAlert|Packages)/.*: warning:" build/build.log; then
-            echo "::error::The build produced warnings in NameAlert/ or Packages/ (listed above). The project builds with none."
+          # Only warnings that point into our own sources count: a path that starts with this checkout's NameAlert/
+          # or Packages/ folder. Xcode's own messages, such as the appintentsmetadataprocessor ones, do not start
+          # with a path, and nothing under build/ (derived data, resolved packages) is ours.
+          workspace="$(printf '%s' "$GITHUB_WORKSPACE" | sed -e 's/[][\.*^$+?(){}|]/\\&/g')"
+          if grep -h -E "^$workspace/(NameAlert|Packages)/.*: warning:" build/build.log build/screenshots-tests.log; then
+            echo "::error::The build or the Screenshots tests produced warnings in NameAlert/ or Packages/ (listed above). The project builds with none."
             exit 1
           fi
           echo "No warnings in NameAlert/ or Packages/."

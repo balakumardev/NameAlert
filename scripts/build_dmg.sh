@@ -3,7 +3,7 @@
 # Builds NameAlert's Developer ID disk image, dist/NameAlert-<version>.dmg.
 #
 #   scripts/build_dmg.sh                 build, sign, notarize and staple
-#   scripts/build_dmg.sh --no-notarize   build and sign, but do not send the image to Apple's notary service
+#   scripts/build_dmg.sh --no-notarize   build and sign, but do not send the app or the image to Apple's notary service
 #   scripts/build_dmg.sh --unsigned      build the image without any signing: a dry run that needs no
 #                                        certificate and no network (implies --no-notarize)
 #
@@ -12,10 +12,12 @@
 #   2. Builds a universal (arm64 + x86_64) Release app and checks that every Mach-O in it has both slices.
 #   3. Signs the nested code and then the app with the hardened runtime and a secure timestamp, using the
 #      app's one entitlements file (NameAlert/NameAlert.entitlements). No --deep: each piece is signed itself.
-#   4. Packs the app and an Applications shortcut into a compressed disk image, and signs the image.
-#   5. Sends the image to Apple's notary service (waits up to 60 minutes), staples the ticket to it and has
+#   4. Notarizes the app by itself first: a zip of it goes to Apple's notary service (waits up to 60 minutes), and the
+#      ticket is stapled to the app, so the copy in the disk image is a notarized app wherever it ends up.
+#   5. Packs the stapled app and an Applications shortcut into a compressed disk image, and signs the image.
+#   6. Sends the image to Apple's notary service (waits up to 60 minutes), staples the ticket to it and has
 #      Gatekeeper assess it.
-#   6. Writes dist/NameAlert-<version>.dmg.sha256 (shasum -a 256, run inside dist/, so `shasum -c` works there).
+#   7. Writes dist/NameAlert-<version>.dmg.sha256 (shasum -a 256, run inside dist/, so `shasum -c` works there).
 #
 # Environment (names only; values are never printed):
 #   BUILD_NUMBER          CFBundleVersion of the app. Default: git rev-list --count HEAD.
@@ -39,7 +41,7 @@ usage() {
     cat <<'EOF'
 Usage: scripts/build_dmg.sh [--no-notarize] [--unsigned]
 
-  --no-notarize   build and sign the disk image, but do not send it to Apple's notary service
+  --no-notarize   build and sign the disk image, but do not send the app or the image to Apple's notary service
   --unsigned      build the disk image without signing it: a dry run that needs no certificate
                   (implies --no-notarize)
   -h, --help      show this help
@@ -117,6 +119,29 @@ identity_exists() {
 # The top-level keys of the property list $1, one per line.
 plist_keys() {
     /usr/libexec/PlistBuddy -c 'Print' "$1" | awk '/^    [^ ]/ { print $1 }'
+}
+
+# Sends the file $1 (the app in a zip, or the disk image) to Apple's notary service and waits for the verdict. $2 says
+# what the file is, for messages. Unless Apple accepted it, prints Apple's log and exits with 1.
+notarize() {
+    local file="$1" what="$2" out notary_status=0 submission_id final_status
+    out="$WORK_DIR/notarytool-$(basename "$file").txt"
+    log "Sending $what to Apple's notary service (waits up to 60 minutes)"
+    xcrun notarytool submit "$file" --key "$ASC_KEY_PATH" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" \
+        --wait --timeout 60m > "$out" 2>&1 || notary_status=$?
+    cat "$out"
+
+    # The text output ends with "  status: Accepted" (or Invalid, Rejected) under "Processing complete".
+    submission_id="$(awk '$1 == "id:" && !found { print $2; found = 1 }' "$out")"
+    final_status="$(awk '$1 == "status:" { s = $2 } END { print s }' "$out")"
+    if [[ $notary_status -ne 0 || "$final_status" != "Accepted" ]]; then
+        echo "ERROR: Apple's notary service did not accept $what (notarytool exit $notary_status, status '${final_status:-none}')." >&2
+        if [[ -n "$submission_id" ]]; then
+            echo "The notary log for submission $submission_id:" >&2
+            xcrun notarytool log "$submission_id" --key "$ASC_KEY_PATH" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" >&2 || true
+        fi
+        exit 1
+    fi
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -323,6 +348,28 @@ else
 fi
 
 # ---------------------------------------------------------------------------------------------------------------------
+# Notarize and staple the app, before it goes into the disk image
+# ---------------------------------------------------------------------------------------------------------------------
+
+if $NOTARIZE; then
+    # The app is notarized by itself, so that the copy that goes into the image carries its own ticket: it passes
+    # Gatekeeper wherever it is dragged to, without looking for the image's. Notarizing only the image leaves the app in
+    # it unstapled.
+    log "Notarizing the app on its own"
+    APP_ZIP="$WORK_DIR/$APP_NAME.zip"
+    # ditto, as Apple asks: it keeps the symlinks and the signature of the app as they are.
+    ditto -c -k --keepParent "$APP" "$APP_ZIP"
+    notarize "$APP_ZIP" "the app"
+
+    log "Stapling the notarization ticket to the app"
+    xcrun stapler staple "$APP"
+    xcrun stapler validate "$APP"
+    spctl -a -t exec -vv "$APP"
+else
+    log "Skipping notarization of the app"
+fi
+
+# ---------------------------------------------------------------------------------------------------------------------
 # Disk image
 # ---------------------------------------------------------------------------------------------------------------------
 
@@ -360,33 +407,16 @@ fi
 # ---------------------------------------------------------------------------------------------------------------------
 
 if $NOTARIZE; then
-    log "Sending $DMG to Apple's notary service (waits up to 60 minutes)"
-    notary_out="$WORK_DIR/notarytool.txt"
-    notary_status=0
-    xcrun notarytool submit "$DMG" --key "$ASC_KEY_PATH" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" \
-        --wait --timeout 60m > "$notary_out" 2>&1 || notary_status=$?
-    cat "$notary_out"
+    notarize "$DMG" "the disk image"
 
-    # The text output ends with "  status: Accepted" (or Invalid, Rejected) under "Processing complete".
-    submission_id="$(awk '$1 == "id:" && !found { print $2; found = 1 }' "$notary_out")"
-    final_status="$(awk '$1 == "status:" { s = $2 } END { print s }' "$notary_out")"
-    if [[ $notary_status -ne 0 || "$final_status" != "Accepted" ]]; then
-        echo "ERROR: Apple's notary service did not accept the disk image (notarytool exit $notary_status, status '${final_status:-none}')." >&2
-        if [[ -n "$submission_id" ]]; then
-            echo "The notary log for submission $submission_id:" >&2
-            xcrun notarytool log "$submission_id" --key "$ASC_KEY_PATH" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" >&2 || true
-        fi
-        exit 1
-    fi
-
-    log "Stapling the notarization ticket"
+    log "Stapling the notarization ticket to the disk image"
     xcrun stapler staple "$DMG"
     xcrun stapler validate "$DMG"
 
     log "Asking Gatekeeper to assess the disk image"
     spctl -a -t open --context context:primary-signature -vv "$DMG"
 else
-    log "Skipping notarization"
+    log "Skipping notarization of the disk image"
 fi
 
 # Stapling changes the file, so the checksum is taken last. It is the same file release.yml writes.

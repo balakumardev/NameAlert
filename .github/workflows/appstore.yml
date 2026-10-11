@@ -3,17 +3,25 @@ name: App Store
 # Builds the Mac App Store package and puts it in App Store Connect.
 #
 #   push to main (app paths)   run the tests, sign, build, validate, upload to App Store Connect (TestFlight)
-#   push of a v* tag           the same, then sync appstore/asc, create or update the App Store version,
-#                              attach the build and submit it for review (released automatically once approved)
+#   push of a v* tag           the same, then sync appstore/asc, create or update the App Store version, upload the
+#                              screenshots, set the App Review details, attach the build and submit it for review
+#                              (released automatically once approved)
 #   manual run                 like a push to main; tick "submit" to submit for review as well
 #
+# It runs on GitHub's preview image with Xcode 27 (the label xcode-27), and uses the newest Xcode that is not a beta.
 # The build number is the commit count, so a commit keeps its number when it is tagged after main has
 # uploaded it. A tag or "submit" run finds that build in App Store Connect and uses it instead of
 # uploading a second copy, which App Store Connect would refuse.
 #
+# xcodegen and asc are installed at the exact versions below, from their GitHub releases, and checked against the
+# SHA-256 of each file. To upgrade one, change its version and checksum here (and in ci.yml and release.yml for
+# xcodegen).
+#
 # Secrets: MAS_SIGNING_P12, MAS_SIGNING_PASSWORD, MAS_PROVISIONING_PROFILE, APP_STORE_CONNECT_API_KEY_P8,
-# APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID. Variable: ASC_APP_ID.
-# This workflow uses secrets, so it never runs on pull requests. A missing secret fails the run.
+# APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID. Variable: ASC_APP_ID. A missing secret fails the run.
+# One more secret, APP_REVIEW_CONTACT_PHONE (the phone number App Review may call, with a plus sign and country code),
+# is needed the first time, when App Store Connect has no review details for the version yet; it is not checked for.
+# This workflow uses secrets, so it never runs on pull requests.
 
 on:
   push:
@@ -47,7 +55,7 @@ defaults:
 jobs:
   appstore:
     name: Build, upload and submit
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 150
     env:
       ASC_APP_ID: ${{ vars.ASC_APP_ID }}
@@ -167,15 +175,64 @@ jobs:
             exit 1
           fi
 
-      - name: Install xcodegen, asc and jq
+      - name: Install xcodegen 2.46.0, asc 5.14.1 and jq
         env:
+          XCODEGEN_VERSION: '2.46.0'
+          # The SHA-256 GitHub reports for xcodegen.zip in that release.
+          XCODEGEN_SHA256: '4d9e34b62172d645eed6457cac13fc222569974098ef4ee9c3368bedf0196806'
+          ASC_VERSION: '5.14.1'
+          # The SHA-256 GitHub reports for the two macOS files of that release.
+          ASC_SHA256_ARM64: 'da5bd4a0aa52b1a1a04f5c2480d03f1e74ba53ec02410186ee2503c262109642'
+          ASC_SHA256_AMD64: '74324b37c7cbf3b75aef445665b5fd1f2de7141fc671ef047f8c561737ba9695'
           HOMEBREW_NO_INSTALL_CLEANUP: '1'
           HOMEBREW_NO_ENV_HINTS: '1'
         run: |
-          for tool in xcodegen asc jq; do
-            command -v "$tool" >/dev/null || brew install "$tool"
-          done
-          asc --version
+          # A tool that holds secrets in its environment is not taken from "whatever brew has today": it is the version
+          # named above, and the file must have exactly the checksum above.
+          fetch() {
+            curl --fail --silent --show-error --location --retry 3 --output "$2" "$1"
+            echo "$3  $2" | shasum -a 256 -c -
+          }
+
+          xcodegen_dir="$RUNNER_TEMP/xcodegen-$XCODEGEN_VERSION"
+          rm -rf "$xcodegen_dir"
+          mkdir -p "$xcodegen_dir"
+          fetch "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip" \
+            "$RUNNER_TEMP/xcodegen.zip" "$XCODEGEN_SHA256"
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$xcodegen_dir"
+          # The zip holds xcodegen/bin/xcodegen and xcodegen/share/xcodegen/SettingPresets, which it finds by its own path.
+          xcodegen_bin="$xcodegen_dir/xcodegen/bin"
+
+          case "$(uname -m)" in
+            arm64) asc_file="asc_${ASC_VERSION}_macOS_arm64"; asc_sha256="$ASC_SHA256_ARM64" ;;
+            x86_64) asc_file="asc_${ASC_VERSION}_macOS_amd64"; asc_sha256="$ASC_SHA256_AMD64" ;;
+            *)
+              echo "::error::There is no asc $ASC_VERSION build for $(uname -m)."
+              exit 1
+              ;;
+          esac
+          asc_bin="$RUNNER_TEMP/asc-$ASC_VERSION/bin"
+          rm -rf "$RUNNER_TEMP/asc-$ASC_VERSION"
+          mkdir -p "$asc_bin"
+          fetch "https://github.com/rudrankriyam/App-Store-Connect-CLI/releases/download/$ASC_VERSION/$asc_file" \
+            "$asc_bin/asc" "$asc_sha256"
+          chmod 755 "$asc_bin/asc"
+
+          # For the steps that follow, and for this one.
+          {
+            echo "$xcodegen_bin"
+            echo "$asc_bin"
+          } >> "$GITHUB_PATH"
+          export PATH="$xcodegen_bin:$asc_bin:$PATH"
+
+          command -v jq >/dev/null || brew install jq
+          xcodegen --version
+          asc_version="$(asc --version)"
+          echo "$asc_version"
+          if [[ "$asc_version" != "$ASC_VERSION"* ]]; then
+            echo "::error::Expected asc $ASC_VERSION, got: $asc_version"
+            exit 1
+          fi
           # asc sends anonymous usage events unless told not to. Nothing should leave this job but the API calls.
           asc telemetry disable > /dev/null || true
 
@@ -290,10 +347,21 @@ jobs:
             exit 1
           fi
 
-          # A keychain that exists only for this job. The cleanup step deletes it.
-          security create-keychain -p "$keychain_password" "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p "$keychain_password" "$keychain"
+          # A keychain that exists only for this job. The cleanup step deletes it. On the Xcode 27 image, unlocking a
+          # new keychain with its password has failed with "The user name or passphrase you entered is not correct"
+          # (actions/runner-images#14837), and an empty password works there. On a runner that lives for one job the
+          # password protects nothing, so: the random password first, an empty one if that does not work.
+          create_keychain() {
+            security create-keychain -p "$1" "$keychain" \
+              && security set-keychain-settings -lut 21600 "$keychain" \
+              && security unlock-keychain -p "$1" "$keychain"
+          }
+          if ! create_keychain "$keychain_password"; then
+            echo "::warning::A new keychain could not be unlocked with its password, so this one has an empty password (actions/runner-images#14837)."
+            security delete-keychain "$keychain" 2>/dev/null || true
+            keychain_password=""
+            create_keychain ""
+          fi
           security import "$p12" -k "$keychain" -P "$MAS_SIGNING_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productbuild
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
           rm -f "$p12"
@@ -453,8 +521,69 @@ jobs:
           echo "version_id=$version_id" >> "$GITHUB_OUTPUT"
 
           # Listing text for the app and for this version, from appstore/asc.
+          metadata_dir=appstore/asc
+          if [[ "$VERSION" == "1.0.0" ]]; then
+            # App Store Connect does not take "What's New" for the first version of an app (it answers 409 STATE_ERROR).
+            # The pushed copy has no whatsNew; release.yml still reads it from appstore/asc for the GitHub release notes.
+            metadata_dir="$RUNNER_TEMP/asc-metadata"
+            rm -rf "$metadata_dir"
+            cp -R appstore/asc "$metadata_dir"
+            for file in "$metadata_dir/version/$VERSION"/*.json; do
+              [[ -e "$file" ]] || continue
+              jq 'del(.whatsNew)' "$file" > "$file.tmp"
+              mv "$file.tmp" "$file"
+            done
+            echo "The first release: pushing the listing text without whatsNew."
+          fi
           asc metadata push --app "$ASC_APP_ID" --version "$VERSION" --platform MAC_OS \
-            --dir appstore/asc --pretty
+            --dir "$metadata_dir" --pretty
+
+      - name: Upload the screenshots
+        if: steps.plan.outputs.submit == 'true'
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          shopt -s nullglob
+          files=(appstore/screenshots/*.png)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "::error::appstore/screenshots has no PNG files."
+            exit 1
+          fi
+          # APP_DESKTOP is the display type of the Mac listing (2880 x 1800 is one of its sizes). --replace makes the set
+          # exactly these files, so running the step again does not pile up copies.
+          asc screenshots upload --app "$ASC_APP_ID" --version "$VERSION" --platform MAC_OS --locale en-US \
+            --path appstore/screenshots --device-type APP_DESKTOP --replace --confirm --pretty
+
+      - name: Set the App Review details
+        if: steps.plan.outputs.submit == 'true'
+        env:
+          VERSION_ID: ${{ steps.version.outputs.version_id }}
+          REVIEW_CONTACT_FIRST_NAME: Bala
+          REVIEW_CONTACT_LAST_NAME: Kumar
+          REVIEW_CONTACT_EMAIL: mail@balakumar.dev
+          REVIEW_CONTACT_PHONE: ${{ secrets.APP_REVIEW_CONTACT_PHONE }}
+        run: |
+          notes="$(cat appstore/REVIEW_NOTES.md)"
+          if (( ${#notes} > 4000 )); then
+            echo "::error::appstore/REVIEW_NOTES.md has ${#notes} characters; App Review notes allow at most 4000."
+            exit 1
+          fi
+          args=(
+            --version-id "$VERSION_ID"
+            --contact-first-name "$REVIEW_CONTACT_FIRST_NAME"
+            --contact-last-name "$REVIEW_CONTACT_LAST_NAME"
+            --contact-email "$REVIEW_CONTACT_EMAIL"
+            --notes "$notes"
+            --if-exists update
+            --pretty
+          )
+          if [[ -n "$REVIEW_CONTACT_PHONE" ]]; then
+            args+=(--contact-phone "$REVIEW_CONTACT_PHONE")
+          else
+            echo "::warning::APP_REVIEW_CONTACT_PHONE is not set. That is fine when App Store Connect already has the review details; for a new version it refuses them without a phone number."
+          fi
+          # Creates the review details, or updates the ones the version has. No demo account: the app needs none.
+          asc review details-create "${args[@]}"
 
       - name: Attach the build and check readiness
         if: steps.plan.outputs.submit == 'true'

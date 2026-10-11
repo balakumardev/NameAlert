@@ -37,6 +37,9 @@
 #
 # Written for bash 3.2, the one macOS ships.
 
+# step_<id> is called by name ("step_$id"), and on_interrupt through trap: ShellCheck cannot see either call, so it
+# reports those functions, and every function only they call, as never invoked.
+# shellcheck disable=SC2329
 set -uo pipefail
 
 # A path in the environment is relative to where the script was started, not to the repository it moves into.
@@ -61,7 +64,8 @@ INTEGRATION_FILTER='\.(WhisperEngineTests|CallDetection[A-Za-z]*Tests|SecretStor
 PERFORMANCE_FILTER='\.WhisperPerformanceTests/'
 ROSETTA_FILTER='\.WhisperEngineTests/'
 
-# The warnings in our own sources, the way ci.yml finds them: a path inside a NameAlert or Packages folder.
+# The warnings in our own sources: a path inside a NameAlert or Packages folder. ci.yml anchors the same pattern to its
+# checkout (^$GITHUB_WORKSPACE/(NameAlert|Packages)/); here it is not, which makes this check the stricter of the two.
 WARNING_PATTERN='^/.*/(NameAlert|Packages)/.*: warning:'
 
 # MARK: - What the steps are

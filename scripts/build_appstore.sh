@@ -26,6 +26,9 @@
 #                            for team KHD36T7C97. Default: found in the keychain.
 #   INSTALLER_IDENTITY_SHA1  SHA-1 of the "3rd Party Mac Developer Installer" (or "Mac Installer Distribution")
 #                            identity for the team, which signs the package. Default: found in the keychain.
+#   ALLOW_BETA_XCODE         Set to 1 to build with a beta Xcode. Without it the preflight refuses one, because App Store
+#                            Connect rejects an upload that was built with a beta. A beta shows in the developer
+#                            directory (DEVELOPER_DIR, else what xcode-select names) or in `xcodebuild -version`.
 #
 # The script never stops or restarts a running app. Everything it builds goes under build/ and dist/appstore/.
 
@@ -171,6 +174,27 @@ for tool in git xcodebuild xcodegen security plutil lipo codesign pkgutil base64
     fi
 done
 
+# A beta Xcode makes a build that App Store Connect rejects after the upload, an hour into the pipeline. Look for the word
+# in the folder Xcode runs from (Xcode_27.2_beta_2.app, Xcode-beta.app) and in what `xcodebuild -version` says.
+XCODE_DESCRIPTION=""
+if command -v xcodebuild >/dev/null 2>&1; then
+    developer_dir="${DEVELOPER_DIR:-}"
+    if [[ -z "$developer_dir" ]] && command -v xcode-select >/dev/null 2>&1; then
+        developer_dir="$(xcode-select -p 2>/dev/null || true)"
+    fi
+    xcode_version="$(xcodebuild -version 2>/dev/null | tr '\n' ' ' | sed -e 's/ *$//' || true)"
+    XCODE_DESCRIPTION="${xcode_version:-unknown Xcode} from ${developer_dir:-an unknown folder}"
+    shopt -s nocasematch
+    if [[ "$developer_dir $xcode_version" == *beta* ]]; then
+        if [[ "${ALLOW_BETA_XCODE:-}" == "1" ]]; then
+            echo "WARNING: building with a beta Xcode ($XCODE_DESCRIPTION) because ALLOW_BETA_XCODE=1. App Store Connect may reject the upload." >&2
+        else
+            problem "The selected Xcode is a beta ($XCODE_DESCRIPTION), and App Store Connect rejects builds made with one. Select a release Xcode (xcode-select, or DEVELOPER_DIR), or set ALLOW_BETA_XCODE=1 to build anyway."
+        fi
+    fi
+    shopt -u nocasematch
+fi
+
 number_re='^[0-9]+(\.[0-9]+){0,2}$'
 BUILD="${BUILD_NUMBER:-}"
 if [[ -z "$BUILD" ]]; then
@@ -251,6 +275,7 @@ if [[ $problems -ne 0 ]]; then
 fi
 
 log "Preflight passed"
+echo "  xcode:               $XCODE_DESCRIPTION"
 echo "  profile:             $PROFILE_NAME ($PROFILE_UUID), expires $profile_expires"
 echo "  signing identity:    $MAS_IDENTITY"
 echo "  installer identity:  $INSTALLER_IDENTITY"

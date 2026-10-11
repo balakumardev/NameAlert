@@ -51,7 +51,7 @@ Speech transcription runs on your Mac, and your audio never leaves it. NameAlert
 ## Building from Source
 
 Prerequisites:
-- Xcode 15 or later.
+- Xcode 26 or later.
 - XcodeGen.
 
 ```bash
@@ -86,10 +86,11 @@ swift test --package-path Packages/NameAlertKit
 
 ## CI Overview
 
-- `ci.yml`: Runs automated tests on every push.
-- `appstore.yml`: Uploads builds to App Store Connect from `main` and submits for review on `v*` tags.
-- `release.yml`: Builds, notarizes, and publishes DMG releases on `v*` tags.
+- `ci.yml`: Runs on every push and pull request. On GitHub's Xcode 27 preview image (`xcode-27`) it runs the package tests, builds a universal Release app with no warnings allowed in our sources, and runs the Screenshots scheme tests. The package tests also run on macOS 26 and macOS 15 (Xcode 26) and on an Intel Mac.
+- `appstore.yml`: Uploads builds to App Store Connect from `main`. On `v*` tags it also syncs the listing text, uploads the screenshots, sets the App Review details and submits for review.
+- `release.yml`: Runs the package tests, then builds, notarizes (the app, then the disk image) and publishes DMG releases on `v*` tags.
 - `pages.yml`: Deploys the static site to GitHub Pages.
+- Workflows that use secrets never run on pull requests, and install `xcodegen` and `asc` at pinned versions checked against a SHA-256.
 
 ## Acknowledgements
 

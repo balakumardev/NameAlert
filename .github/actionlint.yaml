@@ -1,0 +1,6 @@
+# actionlint knows the label of every runner GitHub offers by default, but not of its preview images. xcode-27 is the
+# preview image with Xcode 27 (actions/runner-images, images/macos/xcode-27-arm64-Readme.md): a GitHub-hosted runner,
+# not a self-hosted one.
+self-hosted-runner:
+  labels:
+    - xcode-27
