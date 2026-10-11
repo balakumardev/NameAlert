@@ -25,6 +25,26 @@ extension KeyedDecodingContainer {
             target = Set(names.compactMap(Element.init(rawValue:)))
         }
     }
+
+    /// Same as `decodeTolerantly(into:forKey:)` for an array of structs, decoded one element at a time.
+    ///
+    /// An element that cannot be decoded as `Element` (null, a non-object, or an object missing a required
+    /// key) is skipped and the others keep their order, so one bad entry never takes the rest down with it.
+    /// A missing key, `null`, or a value that is not an array leaves `target` unchanged.
+    func decodeTolerantly<Element: Decodable>(intoElements target: inout [Element], forKey key: Key) {
+        if let wrapped = try? decodeIfPresent([Lossy<Element>].self, forKey: key) {
+            target = wrapped.compactMap(\.element)
+        }
+    }
+}
+
+/// Decodes to `nil` instead of throwing, so an unkeyed container always moves on to the next element.
+private struct Lossy<Element: Decodable>: Decodable {
+    let element: Element?
+
+    init(from decoder: any Decoder) {
+        element = try? Element(from: decoder)
+    }
 }
 
 extension Double {

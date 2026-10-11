@@ -135,7 +135,8 @@ struct ConfigurationCodingTests {
                       "webhook": {"headerNames": "X-Token", "url": "https://example.com/h"}},
          "globalCooldownSeconds": "fast",
          "history": null,
-         "rules": [{"id": "not-a-uuid", "name": 3, "terms": "a", "isEnabled": "yes", "cooldownSeconds": "soon"}]}
+         "rules": [{"id": "not-a-uuid", "name": "x", "terms": ["a"], "sensitivity": 3, "channels": "sound",
+                    "isEnabled": "yes", "cooldownSeconds": "soon"}]}
         """#
         let config = try decode(json)
         #expect(config.listening == ListeningSettings())
@@ -150,11 +151,46 @@ struct ConfigurationCodingTests {
         #expect(config.globalCooldownSeconds == 3)
         #expect(config.history == HistorySettings())
         #expect(config.rules.count == 1)
+        // Apart from name and terms, a rule's fields are all tolerant: the rule survives with defaults.
         let rule = try #require(config.rules.first)
-        #expect(rule.name == "")
-        #expect(rule.terms.isEmpty)
+        #expect(rule.name == "x")
+        #expect(rule.terms == ["a"])
+        #expect(rule.sensitivity == .balanced)
+        #expect(rule.channels == [.sound, .notification])
         #expect(rule.isEnabled)
         #expect(rule.cooldownSeconds == 10)
+    }
+
+    @Test func badRuleElementIsSkipped() throws {
+        // One unreadable element must not take the user's other rules down with it.
+        let json = #"{"rules":[{"name":"a","terms":["x"]},null,42,{"terms":["y"]},{"name":"b","terms":["z"]}]}"#
+        let config = try decode(json)
+        #expect(config.rules.map(\.name) == ["a", "b"])
+        #expect(config.rules.map(\.terms) == [["x"], ["z"]])
+    }
+
+    @Test func ruleWithoutUsableNameOrTermsIsSkipped() throws {
+        // A rule is only worth keeping with a name and its terms; every other kind of damage leaves it unusable.
+        let unusable = [
+            #"{"name":3,"terms":["a"]}"#,       // name is not a string
+            #"{"name":null,"terms":["a"]}"#,
+            #"{"name":"a","terms":"a"}"#,       // terms is not an array
+            #"{"name":"a","terms":["x",5]}"#,
+            #"{"name":"a"}"#,
+            "{}", "[]", #""rule""#, "true",
+        ]
+        let json = #"{"rules":[\#(unusable.joined(separator: ",")),{"name":"kept","terms":["k"]}]}"#
+        let config = try decode(json)
+        #expect(config.rules.map(\.name) == ["kept"])
+    }
+
+    @Test func rulesFieldThatIsNotAnArrayIsIgnored() throws {
+        // Nothing to salvage from the rules themselves, but the rest of the file still loads.
+        for json in [#"{"rules":"oops"}"#, #"{"rules":null}"#, #"{"rules":{"name":"a","terms":["x"]}}"#] {
+            #expect(try decode(json).rules.isEmpty, "\(json)")
+        }
+        let config = try decode(#"{"rules":"oops","listening":{"source":"microphone"}}"#)
+        #expect(config.listening.source == .microphone)
     }
 
     @Test func emptyChannelListIsKept() throws {

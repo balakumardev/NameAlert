@@ -29,12 +29,15 @@ public struct Rule: Codable, Sendable, Equatable, Hashable, Identifiable {
         self.isEnabled = isEnabled
     }
 
+    /// `name` and `terms` are required: without them there is no rule to keep, so decoding throws and the
+    /// caller skips the element (see `AppConfiguration.rules`). Every other field is tolerant and falls back
+    /// to its default, including a missing `id`, which becomes a fresh one.
     public init(from decoder: any Decoder) throws {
-        self.init(name: "", terms: [])  // fresh id and defaults; anything that decodes cleanly replaces them
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        let name = try container.decode(String.self, forKey: .name)
+        let terms = try container.decode([String].self, forKey: .terms)
+        self.init(name: name, terms: terms)  // fresh id and defaults; anything that decodes cleanly replaces them
         container.decodeTolerantly(into: &id, forKey: .id)
-        container.decodeTolerantly(into: &name, forKey: .name)
-        container.decodeTolerantly(into: &terms, forKey: .terms)
         container.decodeTolerantly(into: &sensitivity, forKey: .sensitivity)
         container.decodeTolerantly(intoSet: &channels, forKey: .channels)
         container.decodeTolerantly(into: &cooldownSeconds, forKey: .cooldownSeconds)

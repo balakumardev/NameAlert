@@ -63,7 +63,9 @@ public struct GeneralSettings: Codable, Sendable, Equatable {
 ///
 /// Decoding is field by field: a missing key, a value of the wrong type or an unknown enum value falls back
 /// to that field's default and never fails the whole file. Only a document that is not a JSON object throws.
-/// `schemaVersion` is kept exactly as read so the store can spot a file written by a newer app.
+/// Rules are decoded one by one: a rule that cannot be read (not an object, or no name or terms) is skipped
+/// and the others are kept. `schemaVersion` is kept exactly as read so the store can spot a file written by a
+/// newer app.
 public struct AppConfiguration: Codable, Sendable, Equatable {
     public static let currentSchemaVersion = 1
     static let globalCooldownRange: ClosedRange<Double> = 0...30
@@ -90,7 +92,7 @@ public struct AppConfiguration: Codable, Sendable, Equatable {
         container.decodeTolerantly(into: &hasCompletedOnboarding, forKey: .hasCompletedOnboarding)
         container.decodeTolerantly(into: &listening, forKey: .listening)
         container.decodeTolerantly(into: &speech, forKey: .speech)
-        container.decodeTolerantly(into: &rules, forKey: .rules)
+        container.decodeTolerantly(intoElements: &rules, forKey: .rules)
         container.decodeTolerantly(into: &channels, forKey: .channels)
         container.decodeTolerantly(into: &globalCooldownSeconds, forKey: .globalCooldownSeconds)
         container.decodeTolerantly(into: &history, forKey: .history)
