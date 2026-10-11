@@ -179,12 +179,14 @@ public final class ListeningController {
         }
     }
 
-    /// Marks setup as done, saves it, and starts listening.
+    /// Marks setup as done, turns "Start listening when the app opens" on (setting up later turned it off, and finishing
+    /// setup now means listening), saves that, and starts listening.
     public func completeOnboarding() async {
         await command {
             await loadConfigurationIfNeeded()
-            if !configuration.hasCompletedOnboarding {
+            if !configuration.hasCompletedOnboarding || !configuration.listening.startOnLaunch {
                 configuration.hasCompletedOnboarding = true
+                configuration.listening.startOnLaunch = true
                 await dependencies.configStore.save(configuration)
             }
             await performStart()

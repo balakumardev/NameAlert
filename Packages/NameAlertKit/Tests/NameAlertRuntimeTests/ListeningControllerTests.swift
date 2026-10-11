@@ -190,13 +190,17 @@ struct ListeningControllerTests {
     }
 
     @Test func completeOnboardingSavesAndStarts() async throws {
-        let h = try Harness(configuration: .test(onboarded: false))
+        // The harness's configuration has "start at launch" off, as "Set up later" leaves it.
+        let h = try Harness(configuration: .test(onboarded: false, startOnLaunch: false))
         await h.controller.bootstrap()
         await h.controller.completeOnboarding()
         #expect(h.controller.configuration.hasCompletedOnboarding)
+        #expect(h.controller.configuration.listening.startOnLaunch, "Finishing setup turns start at launch back on")
         #expect(await eventually { h.controller.state.isListening })
         await h.controller.systemWillSleep()  // writes the configuration now
-        #expect(try h.configurationOnDisk().hasCompletedOnboarding)
+        let onDisk = try h.configurationOnDisk()
+        #expect(onDisk.hasCompletedOnboarding)
+        #expect(onDisk.listening.startOnLaunch)
         await h.finish()
     }
 

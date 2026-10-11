@@ -488,12 +488,15 @@ struct OnboardingLogicTests {
         #expect(model.isFinished)
     }
 
-    @Test("Done finishes setup and starts listening")
+    @Test("Done finishes setup, starts listening, and turns start at launch back on after Set up later turned it off")
     func done() async {
-        let controller = makeController(configurationWithMyName)
-        let model = OnboardingModel(configuration: configurationWithMyName, step: .finish)
+        var configuration = configurationWithMyName
+        configuration.listening.startOnLaunch = false  // as "Set up later" leaves it
+        let controller = makeController(configuration)
+        let model = OnboardingModel(configuration: configuration, step: .finish)
         await model.finish(using: controller)
         #expect(controller.configuration.hasCompletedOnboarding)
+        #expect(controller.configuration.listening.startOnLaunch)
         #expect(controller.state != .off, "Listening started: \(controller.state)")
         #expect(model.isFinished)
         await controller.pause()
