@@ -392,7 +392,7 @@ struct AlertDispatcherTests {
         await dispatcher.dispatch(hit(), rule: rule([.webhook]))
 
         let failure = await dispatcher.lastFailures()[.webhook]
-        #expect(failure == DeliveryFailure(kind: .webhook, reason: String(describing: Boom()), date: TestClock.at(10)))
+        #expect(failure == DeliveryFailure(kind: .webhook, reason: Boom().localizedDescription, date: TestClock.at(10)))
 
         webhook.setBehavior(.succeed)
         clock.set(to: 20)
@@ -431,6 +431,48 @@ struct AlertDispatcherTests {
         let reason = await dispatcher.lastFailures()[.webhook]?.reason
         #expect(reason == error.localizedDescription)
         #expect(reason?.contains("secret-token") == false)
+    }
+
+    @Test func aSystemErrorIsReportedInItsOwnWords() async {
+        let error = NSError(
+            domain: "UNErrorDomain", code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Notifications are not allowed for this application"])
+        let dispatcher = await makeDispatcher([FakeChannel(.notification, .fail(error))], clock: TestClock())
+
+        await dispatcher.dispatch(hit(), rule: rule([.notification]))
+
+        let reason = await dispatcher.lastFailures()[.notification]?.reason
+        #expect(reason == "Notifications are not allowed for this application")  // not "Error Domain=UNErrorDomain …"
+        #expect(DeliveryFailure.reason(for: error) == reason)
+    }
+
+    @Test func nameAlertsOwnErrorsReadAsTheyDescribeThemselves() {
+        let errors: [any Error] = [
+            AlertDeliveryError.notConfigured(.ntfy), AlertDeliveryError.rateLimited(.telegramCall),
+            HTTPError.status(503), HTTPError.invalidResponse,
+        ]
+        for error in errors {
+            #expect(DeliveryFailure.reason(for: error) == String(describing: error))
+        }
+    }
+
+    @Test func aRateLimitedDeliveryIsNotAFailure() async {
+        let telegram = FakeChannel(.telegramCall, .fail(Boom()))
+        let clock = TestClock()
+        let dispatcher = await makeDispatcher(
+            [telegram], clock: clock, settings: allConfigured(), globalCooldown: 0)
+
+        clock.set(to: 1)
+        await dispatcher.dispatch(hit(), rule: rule([.telegramCall]))
+        let failure = DeliveryFailure(kind: .telegramCall, reason: Boom().localizedDescription, date: TestClock.at(1))
+        #expect(await dispatcher.lastFailures()[.telegramCall] == failure)
+
+        // Turned down because the last call was too recent: neither a new failure nor a success that clears the old one.
+        telegram.setBehavior(.fail(AlertDeliveryError.rateLimited(.telegramCall)))
+        clock.set(to: 2)
+        #expect(await dispatcher.dispatch(hit(), rule: rule([.telegramCall])))
+        #expect(await dispatcher.lastFailures()[.telegramCall] == failure)
+        #expect(telegram.attempts == 2)
     }
 
     @Test func overlappingDispatchesEachFinishTheirOwnDeliveries() async {
@@ -517,7 +559,7 @@ struct AlertDispatcherTests {
         }
         #expect(
             await dispatcher.lastFailures()[.webhook]
-                == DeliveryFailure(kind: .webhook, reason: String(describing: Boom()), date: TestClock.at(7)))
+                == DeliveryFailure(kind: .webhook, reason: Boom().localizedDescription, date: TestClock.at(7)))
 
         // A test that works again clears what the failed one left.
         webhook.setBehavior(.succeed)
@@ -538,6 +580,16 @@ struct AlertDispatcherTests {
         #expect(await dispatcher.lastFailures()[.ntfy]?.reason == "Timed out")
     }
 
+    @Test func testReportsARateLimitWithoutRecordingAFailure() async {
+        let telegram = FakeChannel(.telegramCall, .fail(AlertDeliveryError.rateLimited(.telegramCall)))
+        let dispatcher = await makeDispatcher([telegram], clock: TestClock(), settings: allConfigured())
+
+        await #expect(throws: AlertDeliveryError.rateLimited(.telegramCall)) {
+            try await dispatcher.test(.telegramCall, hit: hit(segmentID: "test"))
+        }
+        #expect(await dispatcher.lastFailures().isEmpty)
+    }
+
     @Test func testWithoutAChannelThrows() async {
         let dispatcher = await makeDispatcher([FakeChannel(.sound)], clock: TestClock())
 
@@ -555,5 +607,9 @@ struct AlertDispatcherTests {
         #expect(AlertDeliveryError.notConfigured(.ntfy).localizedDescription.isEmpty == false)
         #expect(AlertDeliveryError.invalidAddress(.webhook).localizedDescription.isEmpty == false)
         #expect(AlertDeliveryError.noChannel(.sound).localizedDescription.isEmpty == false)
+        #expect(
+            AlertDeliveryError.rateLimited(.telegramCall).localizedDescription
+                == "Telegram calls are limited to one a minute — try again shortly.")
+        #expect(AlertDeliveryError.rateLimited(.ntfy).localizedDescription.isEmpty == false)
     }
 }

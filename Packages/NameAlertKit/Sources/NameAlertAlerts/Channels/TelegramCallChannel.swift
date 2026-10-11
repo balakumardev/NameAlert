@@ -5,9 +5,10 @@ import NameAlertCore
 ///
 /// The user has to allow @CallMeBot_txtbot on Telegram first. The message is the user's template with `{keyword}` (the
 /// term), `{text}` (what was heard) and `{context}` (the words around it) filled in. Calls are placed at most one a
-/// minute: a hit that comes sooner is skipped without a request, and without an error. The request has 10 s and is
-/// not tried again. A request that is refused or never made (no network, an error answer) does not use up the
-/// minute; one that is cut short (timed out, cancelled) does, because the call may have been placed.
+/// minute: a hit that comes sooner is skipped without a request, and `deliver` throws
+/// `AlertDeliveryError.rateLimited`, which the dispatcher does not count as a failure and a Test shows. The request has
+/// 10 s and is not tried again. A request that is refused or never made (no network, an error answer) does not use up
+/// the minute; one that is cut short (timed out, cancelled) does, because the call may have been placed.
 public actor TelegramCallChannel: AlertChannel {
     public nonisolated var kind: ChannelKind { .telegramCall }
 
@@ -37,7 +38,7 @@ public actor TelegramCallChannel: AlertChannel {
         let moment = now()
         if let last = lastCall, moment >= last, moment.timeIntervalSince(last) < Self.minimumGap {
             logger.info("A Telegram call was skipped: the last one was less than a minute ago")
-            return
+            throw AlertDeliveryError.rateLimited(.telegramCall)
         }
 
         var request = URLRequest(url: url)

@@ -113,8 +113,7 @@ struct ChannelTestRow: View {
 
     /// What went wrong, the way the dispatcher words it for "Last delivery failed", so that the two can be compared.
     static func reason(for error: any Error) -> String {
-        if let error = error as? URLError { return error.localizedDescription }
-        return String(describing: error)
+        DeliveryFailure.reason(for: error)
     }
 
     /// "Last delivery failed: HTTP 404 (10:32)", unless the test that just failed has said the same.

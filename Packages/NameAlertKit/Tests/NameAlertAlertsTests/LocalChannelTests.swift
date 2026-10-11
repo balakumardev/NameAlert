@@ -45,7 +45,7 @@ struct LocalChannelsTests {
         #expect(content.categoryIdentifier == "HIT")
         #expect(content.threadIdentifier == ruleID.uuidString)
         #expect(content.userInfo["ruleID"] as? String == ruleID.uuidString)
-        #expect(content.sound == UNNotificationSound.default)
+        #expect(content.sound == nil)  // the Sound channel plays the alert, at the user's volume
 
         var withoutContext = NotificationSettings()
         withoutContext.includeContext = false
@@ -54,6 +54,7 @@ struct LocalChannelsTests {
         #expect(plain.body == "My name")  // the rule's name, not the words that were heard
         #expect(plain.categoryIdentifier == "HIT")
         #expect(plain.threadIdentifier == ruleID.uuidString)
+        #expect(plain.sound == nil)
     }
 
     @Test func notificationWithNothingHeardAroundTheTermShowsTheRuleName() {

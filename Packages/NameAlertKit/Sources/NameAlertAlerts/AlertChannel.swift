@@ -26,6 +26,14 @@ public struct DeliveryFailure: Sendable, Equatable {
         self.reason = reason
         self.date = date
     }
+
+    /// The words a failure gives for `error`: its `localizedDescription`. NameAlert's own errors (`AlertDeliveryError`,
+    /// `HTTPError`) say what went wrong in plain words through it. Any other error gets the sentence the system has for
+    /// it rather than its internals: a network error's description lists the address that was called (a webhook
+    /// address can hold a secret), a system error's its domain, code and user info.
+    public static func reason(for error: any Error) -> String {
+        error.localizedDescription
+    }
 }
 
 /// Why a delivery failed, when NameAlert itself found the reason (as opposed to the network or the system).
@@ -40,6 +48,10 @@ public enum AlertDeliveryError: Error, Equatable, Sendable {
     case invalidAddress(ChannelKind)
     /// The sound named in the settings was not found, or could not be played.
     case soundUnavailable
+    /// The channel turned the alert down because its last one went out too recently: Telegram calls go out at most once
+    /// a minute. That is the channel working as it should, so the dispatcher does not count it as a failure; a Test
+    /// reports it.
+    case rateLimited(ChannelKind)
 }
 
 extension AlertDeliveryError: LocalizedError, CustomStringConvertible {
@@ -50,6 +62,8 @@ extension AlertDeliveryError: LocalizedError, CustomStringConvertible {
         case .notConfigured: "Not set up yet"
         case .invalidAddress: "The address is not valid"
         case .soundUnavailable: "The sound could not be played"
+        case .rateLimited(.telegramCall): "Telegram calls are limited to one a minute — try again shortly."
+        case .rateLimited: "This alert went out a moment ago — try again shortly."
         }
     }
 

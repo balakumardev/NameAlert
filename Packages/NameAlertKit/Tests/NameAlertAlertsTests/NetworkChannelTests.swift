@@ -624,7 +624,11 @@ struct NetworkChannelsTests {
         clock.set(to: 0)
         try await channel.deliver(hit, settings: telegramSettings(), secrets: noSecrets)
         clock.set(to: 10)
-        try await channel.deliver(hit, settings: telegramSettings(), secrets: noSecrets)  // too soon: no request
+        // Too soon: no request, and an error that says why, so that a Test does not say "Sent".
+        let skipped = await #expect(throws: AlertDeliveryError.rateLimited(.telegramCall)) {
+            try await channel.deliver(hit, settings: telegramSettings(), secrets: noSecrets)
+        }
+        #expect(skipped?.localizedDescription == "Telegram calls are limited to one a minute — try again shortly.")
         #expect(server.requestCount == 1)
 
         clock.set(to: 61)  // a minute after the call, whatever happened in between
@@ -700,7 +704,9 @@ struct NetworkChannelsTests {
         #expect(server.requests.map(\.request.timeoutInterval) == [10, 10])
 
         clock.set(to: 20)
-        try await channel.deliver(sampleHit(), settings: telegramSettings(), secrets: noSecrets)
+        await #expect(throws: AlertDeliveryError.rateLimited(.telegramCall)) {
+            try await channel.deliver(sampleHit(), settings: telegramSettings(), secrets: noSecrets)
+        }
         #expect(server.requestCount == 2)  // the call that went through at 5 s holds the minute
     }
 
@@ -730,7 +736,9 @@ struct NetworkChannelsTests {
             try await channel.deliver(sampleHit(), settings: telegramSettings(), secrets: noSecrets)
         }
         clock.set(to: 5)
-        try await channel.deliver(sampleHit(), settings: telegramSettings(), secrets: noSecrets)
+        await #expect(throws: AlertDeliveryError.rateLimited(.telegramCall)) {
+            try await channel.deliver(sampleHit(), settings: telegramSettings(), secrets: noSecrets)
+        }
         #expect(server.requestCount == 1)
 
         clock.set(to: 61)

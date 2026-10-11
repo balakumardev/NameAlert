@@ -13,8 +13,9 @@ import NameAlertCore
 /// A hit goes to the channels that are both in the rule and set up, all at once. Every delivery has `deliveryTimeout`
 /// to finish, and a delivery that is slow, stuck or failing cannot hold up the others: a stuck one is given up on when
 /// its time is over, even if it does not react to being cancelled. A delivery that throws or times out is remembered
-/// as that channel's last failure, and the next delivery that works clears it. `deliver` returns when all the
-/// deliveries are over, whether or not they worked.
+/// as that channel's last failure (in the words of `DeliveryFailure.reason(for:)`), and the next delivery that works
+/// clears it. A channel that turns a delivery down with `AlertDeliveryError.rateLimited` has not failed: that changes
+/// nothing. `deliver` returns when all the deliveries are over, whether or not they worked.
 ///
 /// If the task that calls `deliver` (or `dispatch`) is cancelled, the deliveries still running are cancelled with it. A
 /// cancelled delivery is not a failure of its channel, so none is recorded for it.
@@ -106,8 +107,8 @@ public actor AlertDispatcher {
     }
 
     /// Delivers `hit` to one channel, whatever the rule or the cooldown says, and throws what went wrong: the error
-    /// the channel threw, `AlertDeliveryError.timedOut` after the delivery timeout, or `noChannel` when the dispatcher
-    /// has no channel of that kind. It does not start the cooldown.
+    /// the channel threw (`AlertDeliveryError.rateLimited` included), `AlertDeliveryError.timedOut` after the delivery
+    /// timeout, or `noChannel` when the dispatcher has no channel of that kind. It does not start the cooldown.
     ///
     /// It counts as that channel's latest delivery: a failure is remembered, and a success clears the last one.
     public func test(_ kind: ChannelKind, hit: Hit) async throws {
@@ -117,7 +118,7 @@ public actor AlertDispatcher {
         record(outcome, for: kind)
         switch outcome {
         case .delivered: return
-        case .failed(let error): throw error
+        case .failed(let error), .declined(let error): throw error
         case .timedOut: throw AlertDeliveryError.timedOut
         case .cancelled: throw CancellationError()
         }
@@ -135,10 +136,10 @@ public actor AlertDispatcher {
         case .delivered:
             failures[kind] = nil
         case .failed(let error):
-            recordFailure(kind, reason: Self.reason(for: error))
+            recordFailure(kind, reason: DeliveryFailure.reason(for: error))
         case .timedOut:
-            recordFailure(kind, reason: "Timed out")
-        case .cancelled:
+            recordFailure(kind, reason: DeliveryFailure.reason(for: AlertDeliveryError.timedOut))
+        case .declined, .cancelled:
             break
         }
     }
@@ -149,19 +150,14 @@ public actor AlertDispatcher {
         logger.error("A \(kind.rawValue, privacy: .public) alert failed: \(reason, privacy: .private)")
     }
 
-    /// `String(describing:)` of the error, except for a network error: its description lists the address that was
-    /// called (a webhook address can hold a secret) and internals nobody can use, so it is replaced by the plain
-    /// sentence the system gives for it.
-    private static func reason(for error: any Error) -> String {
-        if let error = error as? URLError { return error.localizedDescription }
-        return String(describing: error)
-    }
-
     // MARK: One delivery against the clock
 
     private enum Outcome: Sendable {
         case delivered
         case failed(any Error)
+        /// The channel turned the delivery down by design (`AlertDeliveryError.rateLimited`): it neither worked nor
+        /// failed.
+        case declined(any Error)
         case timedOut
         /// The task that waits for the delivery was cancelled, or the channel itself ended with a cancellation.
         case cancelled
@@ -183,6 +179,8 @@ public actor AlertDispatcher {
                 report.yield(.delivered)
             } catch is CancellationError {
                 report.yield(.cancelled)
+            } catch AlertDeliveryError.rateLimited(let kind) {
+                report.yield(.declined(AlertDeliveryError.rateLimited(kind)))
             } catch {
                 report.yield(.failed(error))
             }

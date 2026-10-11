@@ -9,6 +9,9 @@ import UserNotifications
 /// The notifications of one rule are grouped in a thread, and carry the "HIT" category with its Snooze and Open
 /// History buttons (see `NotificationActions`). Whether macOS shows them is up to the user's notification settings;
 /// adding a notification does not fail when they are off.
+///
+/// A notification makes no sound of its own: the Sound channel plays the alert sound at the volume the user picked, so
+/// a hit that uses both is heard once.
 public struct NotificationChannel: AlertChannel {
     public var kind: ChannelKind { .notification }
 
@@ -21,7 +24,6 @@ public struct NotificationChannel: AlertChannel {
         let content = UNMutableNotificationContent()
         content.title = "Heard “\(hit.term)”"
         content.body = bodyText(for: hit, includeContext: settings.includeContext)
-        content.sound = .default
         content.categoryIdentifier = NotificationActions.categoryID
         content.threadIdentifier = hit.ruleID.uuidString
         content.userInfo = ["ruleID": hit.ruleID.uuidString]
