@@ -135,7 +135,8 @@ private func isWellFormed(_ progress: [Double]) -> Bool {
 
 // MARK: - Tests
 
-@Suite("ModelManager")
+// The time limit stops a test that waits on a held stub server from hanging the whole run.
+@Suite("ModelManager", .timeLimit(.minutes(1)))
 struct ModelManagerTests {
     // MARK: Catalog
 
@@ -288,6 +289,26 @@ struct ModelManagerTests {
 
         #expect(f.server.requests.isEmpty, "nothing is asked of the server when there is no room")
         #expect(await f.manager.isInstalled(.lightEnglish) == false)
+    }
+
+    @Test func spaceIsNeededOnlyForWhatIsStillMissing() async throws {
+        // All 11 bytes are in the partial file already: nothing is downloaded, so no room is needed.
+        let whole = Fixture(availableSpace: { _ in 0 }) { _ in .ok("never asked") }
+        try whole.writePartial("hello world")
+        try await whole.download()
+        #expect(await whole.manager.isInstalled(.lightEnglish))
+        #expect(whole.server.requests.isEmpty)
+
+        // 5 of the 11 bytes are there: 2 x 11 - 5 = 17 bytes of room are needed.
+        let short = Fixture(availableSpace: { _ in 16 }, reply: StubServer.serving(helloWorld))
+        try short.writePartial("hello")
+        await #expect(throws: ModelError.insufficientSpace(required: 17, available: 16)) { try await short.download() }
+        #expect(short.server.requests.isEmpty)
+        let enough = Fixture(availableSpace: { _ in 17 }, reply: StubServer.serving(helloWorld))
+        try enough.writePartial("hello")
+        try await enough.download()
+        #expect(await enough.manager.isInstalled(.lightEnglish))
+        #expect(enough.server.rangeHeaders == ["bytes=5-"])
     }
 
     @Test func unknownFreeSpaceDoesNotStopTheDownload() async throws {

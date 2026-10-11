@@ -28,9 +28,14 @@ public protocol ModelProviding: Sendable {
     /// in, from any thread, at most one for each whole percent, and a last 1.0 once the file is checked and in
     /// place. All of it is called before this returns or throws, and none of it after. Cancelling the task that runs
     /// this keeps what has arrived, so the next call picks up from there.
+    ///
+    /// `progress` is called while a lock is held, so it must be quick: to show the number, start a `Task` on the main
+    /// actor rather than doing the work in the callback. A `delete` of the model while this runs makes it throw
+    /// `CancellationError`, the same as when its own task is cancelled.
     func download(_ model: WhisperModel, progress: @escaping @Sendable (Double) -> Void) async throws
 
-    /// Removes the model's file and any half-downloaded copy of it.
+    /// Removes the model's file and any half-downloaded copy of it. A download of the model that is running is stopped
+    /// first: it throws `CancellationError`.
     func delete(_ model: WhisperModel) async throws
 }
 
@@ -50,8 +55,9 @@ public protocol ModelProviding: Sendable {
 /// all the bytes (the app quit before the check) goes straight to the check, and one that is longer than the model
 /// can only be wrong, so it is deleted.
 ///
-/// A download needs free space of twice the model's size, and fails with `insufficientSpace` before it asks the
-/// server for anything when there is less. The folder is created the first time a download needs it.
+/// A download needs free space of twice the model's size, less what its partial file already holds (so none when the
+/// partial file is whole), and fails with `insufficientSpace` before it asks the server for anything when there is
+/// less. The folder is created the first time a download needs it.
 ///
 /// Calls for the same model share one download. A second `download` while one is running waits for it, hears its
 /// progress and gets its result. Cancelling one of several callers only takes that caller out; the download stops
@@ -318,8 +324,8 @@ private enum DownloadEvent: Sendable {
 /// Hands what a data task receives to an async stream.
 ///
 /// The bytes come in the chunks the network delivers them in. (Reading them one by one with
-/// `URLSession.bytes(for:)` was measured at about 7 seconds a megabyte on the Mac this was written on, which would
-/// make a 60 MB model a matter of minutes of CPU.)
+/// `URLSession.bytes(for:)` was measured to cost far more CPU per byte, which adds up to minutes for a model of tens
+/// of megabytes.)
 private final class EventDelegate: NSObject, URLSessionDataDelegate, Sendable {
     private let continuation: AsyncThrowingStream<DownloadEvent, any Error>.Continuation
 
@@ -432,13 +438,16 @@ private struct DownloadJob: Sendable {
     func run() async throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
-        let required = descriptor.bytes * 2
-        if let available = availableSpace(directory), available < required {
-            throw ModelError.insufficientSpace(required: required, available: available)
+        let have = try sizeOfUsablePartial()
+        if have < descriptor.bytes {
+            // Twice the model, less what the partial file already holds. A whole partial file needs no room at all.
+            let required = descriptor.bytes * 2 - have
+            if let available = availableSpace(directory), available < required {
+                throw ModelError.insufficientSpace(required: required, available: available)
+            }
         }
 
         var throttle = ProgressThrottle(expected: descriptor.bytes)
-        let have = try sizeOfUsablePartial()
         if have < descriptor.bytes {
             try await fetch(resumingAt: have, throttle: &throttle)
         }
