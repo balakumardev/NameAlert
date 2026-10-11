@@ -38,6 +38,8 @@ public enum AlertDeliveryError: Error, Equatable, Sendable {
     case notConfigured(ChannelKind)
     /// A setting holds an address that cannot be used, such as a server without `https://`.
     case invalidAddress(ChannelKind)
+    /// The sound named in the settings was not found, or could not be played.
+    case soundUnavailable
 }
 
 extension AlertDeliveryError: LocalizedError, CustomStringConvertible {
@@ -47,6 +49,7 @@ extension AlertDeliveryError: LocalizedError, CustomStringConvertible {
         case .noChannel: "This alert is not available"
         case .notConfigured: "Not set up yet"
         case .invalidAddress: "The address is not valid"
+        case .soundUnavailable: "The sound could not be played"
         }
     }
 
