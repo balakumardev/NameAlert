@@ -34,12 +34,13 @@ extension ListeningControllerError: LocalizedError {
 ///
 /// **Listening.** A listening session makes attempts. Each attempt checks the permissions, picks the engine, downloads
 /// a missing local model, gets a new engine ready, starts a new capture source and runs the pipeline: audio chunks go
-/// to the engine (and set `level`), the engine's text goes to the rule engine (and `liveTranscript`), and each hit goes
-/// to the alert dispatcher, then into the history. When capture or the engine fails, the attempt ends and the next
-/// one follows after a pause: `backoffBase`, then twice that after the next failure in a row, up to 30 times it; a
-/// minute of listening starts the count again. A permission that is missing, an engine that cannot be had, or a model
-/// that could not be downloaded ends the session instead: the user must act. In "Only during calls" mode the session
-/// waits for a call (one subscription to the call state for the whole session) and makes its attempts while it lasts.
+/// to the engine (and set `level`), the engine's text goes to the rule engine (and `liveTranscript`), and each hit the
+/// alert dispatcher admits is recorded at once (`recentHits`, the history), then delivered while listening goes on.
+/// When capture or the engine fails, the attempt ends and the next one follows after a pause: `backoffBase`, then twice
+/// that after the next failure in a row, up to 30 times it; a minute of listening starts the count again. A permission
+/// that is missing, an engine that cannot be had, or a model that could not be downloaded ends the session instead: the
+/// user must act. In "Only during calls" mode the session waits for a call (one subscription to the call state for the
+/// whole session) and makes its attempts while it lasts.
 ///
 /// **Stopping.** Everything an attempt started is stopped before it ends: capture first, then the engine. A capture
 /// source that does not answer `start()` or `stop()` within `captureCallLimit` is left behind (and stopped if its
@@ -100,6 +101,13 @@ public final class ListeningController {
     @ObservationIgnored private var shownProgressPhase: UInt64?
     /// How many downloads of each model are running, so that `modelDownloads` drops a model when the last is over.
     @ObservationIgnored private var downloadCounts: [WhisperModel: Int] = [:]
+
+    // MARK: Alerts on their way
+
+    /// The deliveries of admitted hits that are not over yet, each in a task of its own that removes itself when it
+    /// ends (within the dispatcher's delivery timeout). Nothing cancels them: their hits were heard before any pause.
+    @ObservationIgnored private var deliveries: [UInt64: Task<Void, Never>] = [:]
+    @ObservationIgnored private var deliveryCount: UInt64 = 0
 
     /// How long a capture source's `start()`, `stop()` and `endReason()`, and an engine's `stop()`, may take before the
     /// controller stops waiting and leaves that object behind. Tests shorten it.
@@ -860,7 +868,7 @@ public final class ListeningController {
         do {
             for try await update in updates {
                 if Task.isCancelled { break }
-                heard(update, info: info)
+                await heard(update, info: info)
             }
             return Task.isCancelled ? nil : .engineEnded(nil)
         } catch {
@@ -885,31 +893,44 @@ public final class ListeningController {
         level = min(1, Double(chunk.rms) * 4)
     }
 
-    /// The engine heard something: check the rules, send the hits on, and show the text.
-    private func heard(_ update: TranscriptUpdate, info: ListeningInfo) {
+    /// The engine heard something: show the text, check the rules, and send the hits on.
+    private func heard(_ update: TranscriptUpdate, info: ListeningInfo) async {
         let now = dependencies.now()
         let hits = ruleEngine.evaluate(update, source: info.source, engine: info.engine, now: now)
-        if !hits.isEmpty {
-            let excerpt = memory.excerpt(endingWith: update.text, at: now)
-            for var hit in hits {
-                hit.excerpt = excerpt
-                deliver(hit)
-            }
-        }
+        // The excerpt ends with this update's text, so it is made before the update joins what was heard.
+        let excerpt = hits.isEmpty ? nil : memory.excerpt(endingWith: update.text, at: now)
         memory.take(update, at: now)
         liveTranscript = memory.live
-    }
-
-    /// Sends the hit to its rule's channels and records it once it went out. A delivery is not part of the attempt: it
-    /// finishes even when listening stops meanwhile, as the hit was heard before that.
-    private func deliver(_ hit: Hit) {
-        guard let rule = configuration.rules.first(where: { $0.id == hit.ruleID }) else { return }
-        let dispatcher = dispatcher
-        Task {
-            guard await dispatcher.dispatch(hit, rule: rule) else { return }  // held back by the global cooldown
-            await self.record(hit)
+        for var hit in hits {
+            hit.excerpt = excerpt
+            await send(hit)
         }
     }
+
+    /// Hands a hit to the alerts. Unless the global cooldown holds it back, it is recorded at once (the recent hits,
+    /// when the last hit was heard, the history) and its deliveries start in a task of their own. Neither the pipeline
+    /// nor a pause waits for or stops the deliveries: the hit was heard before that.
+    private func send(_ hit: Hit) async {
+        guard let rule = configuration.rules.first(where: { $0.id == hit.ruleID }) else { return }
+        guard await dispatcher.admit(hit, rule: rule) else { return }  // held back by the global cooldown
+        // Admitted: from here on, it is recorded and delivered exactly once, whatever happens meanwhile.
+        await record(hit)
+        startDeliveries(of: hit, rule: rule)
+    }
+
+    private func startDeliveries(of hit: Hit, rule: Rule) {
+        deliveryCount &+= 1
+        let id = deliveryCount
+        let dispatcher = dispatcher
+        // The task cannot run before it is stored: both happen on the main actor, and this does not suspend.
+        deliveries[id] = Task {
+            await dispatcher.deliver(hit, rule: rule)
+            self.deliveries[id] = nil
+        }
+    }
+
+    /// How many hits are still being delivered. For tests.
+    var deliveriesUnderWay: Int { deliveries.count }
 
     private func record(_ hit: Hit) async {
         let index = recentHits.firstIndex { $0.timestamp < hit.timestamp } ?? recentHits.endIndex

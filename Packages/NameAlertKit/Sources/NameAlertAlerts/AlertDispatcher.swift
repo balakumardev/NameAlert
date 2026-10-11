@@ -3,18 +3,21 @@ import NameAlertCore
 
 /// Sends a hit to the alert channels of the rule that fired, and keeps track of which channels are failing.
 ///
-/// A hit that comes within `globalCooldownSeconds` of the last one that was sent on is held back: `dispatch` returns
-/// `false` and nothing is delivered. (Only a hit that is sent on starts the cooldown; a held-back one does not extend
-/// it. A clock that is set back counts as the cooldown being over, so that the dispatcher cannot be silenced by it.)
+/// Sending a hit takes two steps. `admit` decides whether it goes out at all: a hit that comes within
+/// `globalCooldownSeconds` of the last one that was admitted is held back, and nothing is delivered. (Only an admitted
+/// hit starts the cooldown; a held-back one does not extend it. A clock that is set back counts as the cooldown being
+/// over, so that the dispatcher cannot be silenced by it.) `admit` answers at once, whatever deliveries are running, so
+/// a hit can be recorded as soon as it is heard, however slow the channels are. `deliver` then sends the admitted hit,
+/// and `dispatch` does both.
 ///
-/// Otherwise the hit goes to the channels that are both in the rule and set up, all at once. Every delivery has
-/// `deliveryTimeout` to finish, and a delivery that is slow, stuck or failing cannot hold up the others: a stuck one
-/// is given up on when its time is over, even if it does not react to being cancelled. A delivery that throws or
-/// times out is remembered as that channel's last failure, and the next delivery that works clears it.
-/// `dispatch` returns `true` when all the deliveries are over, whether or not they worked.
+/// A hit goes to the channels that are both in the rule and set up, all at once. Every delivery has `deliveryTimeout`
+/// to finish, and a delivery that is slow, stuck or failing cannot hold up the others: a stuck one is given up on when
+/// its time is over, even if it does not react to being cancelled. A delivery that throws or times out is remembered
+/// as that channel's last failure, and the next delivery that works clears it. `deliver` returns when all the
+/// deliveries are over, whether or not they worked.
 ///
-/// If the task that calls `dispatch` is cancelled, the deliveries still running are cancelled with it. A cancelled
-/// delivery is not a failure of its channel, so none is recorded for it.
+/// If the task that calls `deliver` (or `dispatch`) is cancelled, the deliveries still running are cancelled with it. A
+/// cancelled delivery is not a failure of its channel, so none is recorded for it.
 public actor AlertDispatcher {
     private let channels: [ChannelKind: any AlertChannel]
     private let secrets: any SecretStore
@@ -26,13 +29,16 @@ public actor AlertDispatcher {
 
     private var settings = ChannelSettings()
     private var globalCooldownSeconds = AlertDispatcher.defaultGlobalCooldown
-    private var lastDispatch: Date?
+    private var lastAdmission: Date?
     private var failures: [ChannelKind: DeliveryFailure] = [:]
 
-    /// - Parameter channels: The channels that can be delivered to, one for each kind. If two have the same kind,
-    ///   the first is used.
+    /// - Parameters:
+    ///   - channels: The channels that can be delivered to, one for each kind. If two have the same kind, the first is
+    ///     used.
+    ///   - deliveryTimeout: How long one delivery may take. The default leaves a webhook time for all three of its
+    ///     tries (5 s each, with 1 s and 4 s between them).
     public init(
-        channels: [any AlertChannel], secrets: any SecretStore, deliveryTimeout: Duration = .seconds(10),
+        channels: [any AlertChannel], secrets: any SecretStore, deliveryTimeout: Duration = .seconds(25),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         var byKind: [ChannelKind: any AlertChannel] = [:]
@@ -54,16 +60,21 @@ public actor AlertDispatcher {
             : min(max(globalCooldownSeconds, range.lowerBound), range.upperBound)
     }
 
-    /// Delivers the hit to the rule's channels, unless the global cooldown holds it back (then this returns `false`).
-    @discardableResult
-    public func dispatch(_ hit: Hit, rule: Rule) async -> Bool {
+    /// Whether `hit` may go out: `false` when the global cooldown holds it back. An admitted hit starts the cooldown;
+    /// send it with `deliver`. This never waits for anything, deliveries that are running included.
+    public func admit(_ hit: Hit, rule: Rule) -> Bool {
         let moment = now()
-        if let last = lastDispatch, moment >= last, moment.timeIntervalSince(last) < globalCooldownSeconds {
+        if let last = lastAdmission, moment >= last, moment.timeIntervalSince(last) < globalCooldownSeconds {
             logger.info("A hit was held back by the global cooldown")
             return false
         }
-        lastDispatch = moment
+        lastAdmission = moment
+        return true
+    }
 
+    /// Delivers an admitted hit to the rule's channels that are set up, all at once, and records how each delivery
+    /// went. Returns when all of them are over. It does not look at the global cooldown: `admit` does.
+    public func deliver(_ hit: Hit, rule: Rule) async {
         // Fixed now, so that a later `configure` does not change a delivery that is on its way.
         let settings = settings
         let secrets = secrets
@@ -83,6 +94,14 @@ public actor AlertDispatcher {
                 record(outcome, for: kind)
             }
         }
+    }
+
+    /// `admit`, then `deliver`: delivers the hit to the rule's channels unless the global cooldown holds it back (then
+    /// this returns `false` at once). Returns `true` when the deliveries are over.
+    @discardableResult
+    public func dispatch(_ hit: Hit, rule: Rule) async -> Bool {
+        guard admit(hit, rule: rule) else { return false }
+        await deliver(hit, rule: rule)
         return true
     }
 

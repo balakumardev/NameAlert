@@ -285,6 +285,62 @@ struct AlertDispatcherTests {
         #expect(await dispatcher.dispatch(hit(), rule: rule([.sound])))  // negative counts as none
     }
 
+    // MARK: Admission and delivery, one at a time
+
+    @Test func admitAppliesTheGlobalCooldownAndDeliversNothing() async {
+        let sound = FakeChannel(.sound)
+        let clock = TestClock()
+        let dispatcher = await makeDispatcher([sound], clock: clock, globalCooldown: 3)
+        let rule = rule([.sound])
+
+        clock.set(to: 0)
+        #expect(await dispatcher.admit(hit(), rule: rule))
+        clock.set(to: 1)
+        #expect(await dispatcher.admit(hit(), rule: rule) == false)
+        clock.set(to: 3.1)
+        #expect(await dispatcher.admit(hit(), rule: rule))
+        clock.set(to: 3.2)
+        #expect(await dispatcher.dispatch(hit(), rule: rule) == false)  // dispatch shares the cooldown
+
+        #expect(sound.attempts == 0)
+    }
+
+    @Test func deliverSendsAnAdmittedHitWithoutLookingAtTheCooldown() async {
+        let sound = FakeChannel(.sound)
+        let notification = FakeChannel(.notification)
+        let dispatcher = await makeDispatcher([sound, notification], clock: TestClock(), globalCooldown: 3)
+        let rule = rule([.sound])
+
+        #expect(await dispatcher.admit(hit(), rule: rule))
+        await dispatcher.deliver(hit(), rule: rule)
+        await dispatcher.deliver(hit(), rule: rule)  // within the cooldown: delivering is not admitting
+
+        #expect(sound.hits == [hit(), hit()])
+        #expect(notification.attempts == 0)  // not in the rule
+        #expect(await dispatcher.admit(hit(), rule: rule) == false)  // and the deliveries did not end the cooldown
+    }
+
+    @Test func admitAnswersWhileADeliveryIsStuck() async {
+        let gate = Gate()
+        let sound = FakeChannel(.sound, .hangIgnoringCancellation(gate))
+        let clock = TestClock()
+        let dispatcher = await makeDispatcher([sound], clock: clock, globalCooldown: 3)
+
+        clock.set(to: 0)
+        #expect(await dispatcher.admit(hit(), rule: rule([.sound])))
+        let delivery = Task { await dispatcher.deliver(hit(), rule: rule([.sound])) }
+        #expect(await eventually { sound.attempts == 1 })
+
+        clock.set(to: 5)
+        let started = ContinuousClock.now
+        #expect(await dispatcher.admit(hit(segmentID: "s2"), rule: rule([.sound])))
+        #expect(ContinuousClock.now - started < .seconds(1))  // it did not wait for the stuck delivery
+
+        gate.open()
+        await delivery.value
+        #expect(await dispatcher.lastFailures().isEmpty)
+    }
+
     // MARK: Slow and failing channels
 
     @Test func hangingChannelDoesNotBlockOthers() async {

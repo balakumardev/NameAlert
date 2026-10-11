@@ -62,7 +62,7 @@ private final class Harness {
     let speech: FakeSpeech
     let models: FakeModels
     let calls = FakeCallStates()
-    let channel = FakeChannel(.sound)
+    let channel: FakeChannel
     let directory: URL
     let controller: ListeningController
 
@@ -70,7 +70,8 @@ private final class Harness {
         configuration: AppConfiguration = .test(), capabilities: EngineCapabilities = .analyzer,
         sleeper: TestSleeper = TestSleeper(), permissions: PermissionsSnapshot = .allGranted,
         capture: FakeCapture = FakeCapture(), speech: FakeSpeech = FakeSpeech(), models: FakeModels = FakeModels(),
-        callDetectionSupported: Bool = true, captureCallLimit: Duration? = nil
+        channel: FakeChannel = FakeChannel(.sound), callDetectionSupported: Bool = true,
+        captureCallLimit: Duration? = nil
     ) throws {
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("NameAlertRuntimeTests-\(UUID().uuidString)", isDirectory: true)
@@ -82,6 +83,7 @@ private final class Harness {
         self.capture = capture
         self.speech = speech
         self.models = models
+        self.channel = channel
         let clock = clock
         let calls = calls
         let dependencies = RuntimeDependencies(
@@ -752,7 +754,63 @@ struct ListeningControllerTests {
         #expect(await eventually { h.channel.hits.count == 1 })
         let excerpt = try #require(h.channel.hits.first?.excerpt)
         #expect(excerpt == "we were talking about the budget Bala, what do you think")
+        #expect(await eventually { h.controller.recentHits.count == 1 })
         #expect(h.controller.recentHits.first?.excerpt == excerpt)
+        await h.finish()
+    }
+
+    @Test func hitIsRecordedBeforeSlowChannelsFinish() async throws {
+        let channel = FakeChannel(.sound, holdsDeliveries: true)  // as slow as the test wants
+        let h = try Harness(speech: heyBala(), channel: channel)
+        #expect(await h.startListening())
+        #expect(await eventually { h.controller.recentHits.count == 1 })
+        #expect(h.controller.lastHitAt == h.clock.now)
+        #expect(await h.controller.history().count == 1)
+        #expect(await eventually { channel.hits.count == 1 })
+        #expect(channel.finished == 0)  // recorded while its delivery still waits
+        #expect(h.controller.deliveriesUnderWay == 1)
+
+        channel.gate.open()
+        #expect(await eventually { h.controller.deliveriesUnderWay == 0 })
+        #expect(channel.finished == 1)
+        // Recorded and delivered once each.
+        #expect(h.controller.recentHits.count == 1)
+        #expect(await h.controller.history().count == 1)
+        #expect(channel.hits.count == 1)
+        await h.finish()
+    }
+
+    @Test func aPauseDoesNotStopTheDeliveriesOfHitsHeardBeforeIt() async throws {
+        let channel = FakeChannel(.sound, holdsDeliveries: true)
+        let h = try Harness(speech: heyBala(), channel: channel)
+        #expect(await h.startListening())
+        #expect(await eventually { channel.hits.count == 1 })
+        await h.controller.pause()
+        #expect(h.controller.state == .off)
+        #expect(h.controller.deliveriesUnderWay == 1)
+
+        channel.gate.open()
+        #expect(await eventually { h.controller.deliveriesUnderWay == 0 })
+        #expect(channel.finished == 1)
+        #expect(channel.cancelled == 0)
+        #expect(h.controller.recentHits.count == 1)
+        await h.finish()
+    }
+
+    @Test func aHitHeldBackByTheGlobalCooldownIsNeitherRecordedNorDelivered() async throws {
+        let surname = Rule(name: "Surname", terms: ["Kumar"], channels: [.sound])
+        let h = try Harness(
+            configuration: .test(rules: [bala, surname]), capture: FakeCapture([.init(chunks: 2)]),
+            speech: FakeSpeech([.init([final("s1", "hey Bala"), final("s2", "and Kumar")])]))
+        #expect(await h.startListening())
+        #expect(await eventually { h.channel.hits.count == 1 })
+        #expect(await eventually { h.controller.deliveriesUnderWay == 0 })
+        await settle()
+        // "Kumar" is another rule's, but it came within the 3 s global cooldown (the test's clock stands still).
+        #expect(h.channel.hits.map(\.term) == ["Bala"])
+        #expect(h.controller.recentHits.map(\.term) == ["Bala"])
+        #expect(await h.controller.history().count == 1)
+        #expect(h.controller.liveTranscript == "hey Bala and Kumar")
         await h.finish()
     }
 

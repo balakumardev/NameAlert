@@ -567,19 +567,42 @@ final class FakeCallStates: Sendable {
 
 // MARK: - Alerts
 
-/// A channel that records the hits it was given.
+/// A channel that records the hits it was given. One made with `holdsDeliveries` is a slow channel: each delivery
+/// waits until `gate` opens (and ends with `CancellationError` if it is cancelled first).
 final class FakeChannel: AlertChannel {
-    let kind: ChannelKind
-    private let delivered = OSAllocatedUnfairLock(initialState: [Hit]())
-
-    init(_ kind: ChannelKind) {
-        self.kind = kind
+    private struct State: Sendable {
+        var hits: [Hit] = []
+        var finished = 0
+        var cancelled = 0
     }
 
-    var hits: [Hit] { delivered.withLock { $0 } }
+    let kind: ChannelKind
+    let gate = Gate()
+    private let holdsDeliveries: Bool
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
+    init(_ kind: ChannelKind, holdsDeliveries: Bool = false) {
+        self.kind = kind
+        self.holdsDeliveries = holdsDeliveries
+    }
+
+    /// Every hit it was asked to deliver, as soon as it was asked.
+    var hits: [Hit] { state.withLock { $0.hits } }
+    /// Deliveries that are over.
+    var finished: Int { state.withLock { $0.finished } }
+    /// Deliveries that were cancelled while they waited.
+    var cancelled: Int { state.withLock { $0.cancelled } }
 
     func deliver(_ hit: Hit, settings: ChannelSettings, secrets: any SecretStore) async throws {
-        delivered.withLock { $0.append(hit) }
+        state.withLock { $0.hits.append(hit) }
+        defer { state.withLock { $0.finished += 1 } }
+        guard holdsDeliveries else { return }
+        do {
+            try await gate.wait()
+        } catch {
+            state.withLock { $0.cancelled += 1 }
+            throw error
+        }
     }
 }
 
