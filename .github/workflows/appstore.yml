@@ -575,7 +575,6 @@ jobs:
             --contact-email "$REVIEW_CONTACT_EMAIL"
             --notes "$notes"
             --if-exists update
-            --pretty
           )
           if [[ -n "$REVIEW_CONTACT_PHONE" ]]; then
             args+=(--contact-phone "$REVIEW_CONTACT_PHONE")
@@ -583,7 +582,10 @@ jobs:
             echo "::warning::APP_REVIEW_CONTACT_PHONE is not set. That is fine when App Store Connect already has the review details; for a new version it refuses them without a phone number."
           fi
           # Creates the review details, or updates the ones the version has. No demo account: the app needs none.
-          asc review details-create "${args[@]}"
+          # asc prints the saved details, contact phone number included, and this log is public. So stdout is thrown
+          # away. stderr stays for errors, and the step still fails when asc exits with an error.
+          asc review details-create "${args[@]}" > /dev/null
+          echo "The App Review details are set."
 
       - name: Attach the build and check readiness
         if: steps.plan.outputs.submit == 'true'
