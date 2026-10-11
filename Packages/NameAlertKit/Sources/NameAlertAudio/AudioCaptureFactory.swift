@@ -4,19 +4,33 @@ import NameAlertCore
 
 // MARK: - Contract
 
+/// Why a capture run ended.
+public enum CaptureEndReason: Sendable, Equatable {
+    /// `stop()` ended it, a new `start()` replaced it, or its consumer stopped listening.
+    case stopped
+    /// Capture broke down, with a short description.
+    case failed(String)
+    /// The user stopped it from macOS itself, with the screen recording control in the menu bar.
+    case stoppedByUser
+}
+
 /// Something that captures audio and delivers it as 100 ms chunks of 16 kHz mono samples.
 ///
 /// - `start()` begins a run and returns its stream. Chunks are numbered from 0 in every run. If the source is already
 ///   running, the old run is stopped first and its stream finishes. A source that cannot start throws, usually an
 ///   `AudioCaptureError`.
 /// - The stream finishes when the source is stopped, when capture fails, or when the consumer cancels its iteration
-///   (which also releases the device). It keeps the newest 50 chunks (about 5 s) for a consumer that falls behind.
+///   or drops the stream (which also releases the device). It keeps the newest 50 chunks (about 5 s) for a consumer
+///   that falls behind.
 /// - `stop()` ends the current run and finishes its stream. Stopping a stopped source does nothing, and `start()`
 ///   after `stop()` begins a new run.
+/// - `endReason()` says why the last run ended. By the time a consumer sees its stream finish, the reason is set.
 /// - Restarting after a failure, with backoff, is up to the caller.
 public protocol AudioCaptureSource: Sendable {
     func start() async throws -> AsyncStream<AudioChunk>
     func stop() async
+    /// Why the last run ended: nil while a run is going, and before the first one.
+    func endReason() async -> CaptureEndReason?
 }
 
 /// Why a capture source could not start.
@@ -62,19 +76,34 @@ enum ChunkStream {
 /// and chunk assembler, or mixer), numbers the chunks and yields them, synchronously and under one lock, so chunks
 /// leave in order even if two threads push at once.
 ///
-/// The owning actor creates the output when a run starts and finishes it when the run ends. After `finish()`,
+/// The owning actor creates the output when a run starts and finishes it when the run ends. After `finish(reason:)`,
 /// `process(_:)` does nothing, so a callback that fires while its run is torn down is harmless. Each run gets a new
 /// output: a fresh converter, no leftover samples and numbering from 0.
+///
+/// The output also keeps why its run ended. The reason is recorded under the same lock that ends the stream, so it
+/// is in place before any consumer can see the end, even when a capture callback ends the run on its own thread.
+/// The first reason recorded wins: a run that failed stays failed when the actor stops it afterwards.
 final class ChunkOutput<Stage>: @unchecked Sendable {
     private let lock = NSLock()
     /// All guarded by `lock`.
     private var stage: Stage
     private var continuation: AsyncStream<AudioChunk>.Continuation?
     private var nextSequence: UInt64 = 0
+    private var endReason: CaptureEndReason?
 
     init(stage: Stage, continuation: AsyncStream<AudioChunk>.Continuation) {
         self.stage = stage
         self.continuation = continuation
+    }
+
+    /// Backstop: once the output is gone nothing can yield or finish the stream, so a consumer would wait forever.
+    deinit {
+        let continuation = lock.withLock {
+            let continuation = self.continuation
+            self.continuation = nil
+            return continuation
+        }
+        continuation?.finish()
     }
 
     /// Runs `body` on the stage and yields the whole chunks it returns. Does nothing once the output is finished.
@@ -88,9 +117,29 @@ final class ChunkOutput<Stage>: @unchecked Sendable {
         }
     }
 
-    /// Finishes the stream. Later calls, and later `process(_:)` calls, do nothing.
-    func finish() {
+    /// Records why the run ended, unless a reason was recorded before, and returns the reason that stands. The stream
+    /// stays open: for a source that releases its device first and finishes the stream after.
+    @discardableResult
+    func recordEnd(_ reason: CaptureEndReason) -> CaptureEndReason {
+        lock.withLock {
+            if let endReason { return endReason }
+            endReason = reason
+            return reason
+        }
+    }
+
+    /// Why the run ended, or nil while it is going.
+    var recordedEndReason: CaptureEndReason? {
+        lock.withLock { endReason }
+    }
+
+    /// Records `reason`, unless a reason was recorded before, and finishes the stream. Later calls, and later
+    /// `process(_:)` calls, do nothing.
+    func finish(reason: CaptureEndReason) {
         let continuation = lock.withLock {
+            if endReason == nil {
+                endReason = reason
+            }
             let continuation = self.continuation
             self.continuation = nil
             return continuation
