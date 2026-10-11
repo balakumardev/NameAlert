@@ -474,13 +474,15 @@ struct OnboardingLogicTests {
         #expect(already.state == .listening(DemoFixtures.listeningInfo))
     }
 
-    @Test("Set up later finishes setup with no rule and does not start listening")
+    @Test("Set up later finishes setup with no rule, does not start listening, and turns off start at launch")
     func settingUpLater() async {
         let controller = makeController()
         let model = OnboardingModel(configuration: freshConfiguration)
         #expect(!controller.configuration.hasCompletedOnboarding)
+        #expect(controller.configuration.listening.startOnLaunch, "On by default, until Set up later turns it off")
         await model.putOff(using: controller)
         #expect(controller.configuration.hasCompletedOnboarding)
+        #expect(!controller.configuration.listening.startOnLaunch)
         #expect(controller.configuration.rules.isEmpty)
         #expect(controller.state == .off)
         #expect(model.isFinished)

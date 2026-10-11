@@ -167,11 +167,15 @@ final class OnboardingModel {
         lastMove = .now
     }
 
-    /// "Set up later": setup counts as done, with no rule. Nothing starts listening.
+    /// "Set up later": setup counts as done, with no rule. Nothing starts listening, and the "Start listening when the
+    /// app opens" setting goes off, so the next launch does not try either (there is nothing to listen for yet).
     func putOff(using controller: ListeningController) async {
         isFinished = true
         OnboardingResume.clear()
-        await controller.update { $0.hasCompletedOnboarding = true }
+        await controller.update { configuration in
+            configuration.hasCompletedOnboarding = true
+            configuration.listening.startOnLaunch = false
+        }
     }
 
     /// "Done": setup is done, and listening starts if the test has not started it.
