@@ -167,13 +167,19 @@ enum HeaderName {
 
 /// The line under each channel that sends words off this Mac: what goes, and to whom.
 enum LeavesTheMacNote {
-    static func text(sendingTo service: String) -> String {
-        "Sends the words around the mention to \(service)."
+    /// `plusExcerpt` is for a channel that also sends what was said up to 30 seconds before the mention (the hit's
+    /// excerpt, whose window is `TranscriptMemory.excerptWindow`).
+    static func text(sendingTo service: String, plusExcerpt: Bool = false) -> String {
+        plusExcerpt
+            ? "Sends the words around the mention, plus up to 30 seconds before it, to \(service)."
+            : "Sends the words around the mention to \(service)."
     }
 
+    // ntfy's message is the words around the mention; the excerpt only takes their place when there are none.
     static let ntfy = text(sendingTo: "ntfy")
     static let telegramCall = text(sendingTo: "CallMeBot")
-    static let webhook = text(sendingTo: "your webhook")
+    // The webhook's JSON has the excerpt next to the context.
+    static let webhook = text(sendingTo: "your webhook", plusExcerpt: true)
 }
 
 /// The sound names a picker offers: every system sound, and the one in use if it is not among them.
@@ -241,13 +247,17 @@ struct NotificationSection: View {
     }
 }
 
-/// "Notifications are off" with the button that turns them on: the system's question, or, once the user has said no,
-/// the pane of System Settings where it can be changed.
+/// "Notifications are off" with the button that turns them on: the system's question the first time, and after that, or
+/// once the user has said no, the pane of System Settings where it can be changed. The same rule, and the same words,
+/// as the menu bar popover's note (`PermissionOffer`, `NotificationsOffNotice`).
 struct NotificationPermissionRow: View {
+    /// Which permissions were asked for already; the app's own unless a test brings one.
+    var asks: PermissionAsks = .shared
+
     @Environment(ListeningController.self) private var controller
 
     var body: some View {
-        let isDenied = controller.permissions.notifications == .denied
+        let offer = Self.offer(for: controller.permissions.notifications, asks: asks)
         HStack(spacing: 8) {
             Label {
                 Text(verbatim: StatusText.title(for: ListeningIssue.permissionDenied(.notifications)))
@@ -256,15 +266,21 @@ struct NotificationPermissionRow: View {
                     .foregroundStyle(.orange)
             }
             Spacer(minLength: 8)
-            Button(isDenied ? "Open System Settings" : "Turn On") {
-                if isDenied {
-                    SystemSettingsLink.open(.notifications)
+            Button(NotificationsOffNotice.title(for: offer)) {
+                if offer == .allow {
+                    Task { await controller.ask(for: .notifications, asks: asks) }
                 } else {
-                    Task { await controller.ask(for: .notifications) }
+                    SystemSettingsLink.open(.notifications)
                 }
             }
-            .accessibilityLabel(isDenied ? "Open System Settings to turn on notifications" : "Turn on notifications")
+            .accessibilityLabel(
+                offer == .allow ? "Turn on notifications" : "Open System Settings to turn on notifications")
         }
+    }
+
+    /// What the button offers: the system's question until it has been asked, then System Settings.
+    static func offer(for status: PermissionStatus, asks: PermissionAsks) -> PermissionOffer {
+        PermissionOffer(status: status, hasAsked: asks.hasAsked(.notifications))
     }
 }
 

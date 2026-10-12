@@ -634,9 +634,32 @@ struct AlertsAndSpeechLogicTests {
 
     @Test("Each channel that sends words off the Mac says so, and to whom")
     func leavesTheMacNotes() {
+        // ntfy's message is the words around the mention (the excerpt only stands in when there are none), and the
+        // call's message has no placeholder for the excerpt: neither sends the seconds before.
         #expect(LeavesTheMacNote.ntfy == "Sends the words around the mention to ntfy.")
         #expect(LeavesTheMacNote.telegramCall == "Sends the words around the mention to CallMeBot.")
-        #expect(LeavesTheMacNote.webhook == "Sends the words around the mention to your webhook.")
+        // The webhook's JSON carries the excerpt, the last 30 seconds up to the mention, next to the words around it.
+        #expect(
+            LeavesTheMacNote.webhook
+                == "Sends the words around the mention, plus up to 30 seconds before it, to your webhook.")
+    }
+
+    @Test("The notifications row asks once, then points to System Settings, like the popover's note")
+    func notificationRowOffer() throws {
+        try withScratchAsks { asks in
+            #expect(NotificationPermissionRow.offer(for: .notDetermined, asks: asks) == .allow)
+            // Never asked, but already refused (in System Settings, or by an earlier install): no question to ask.
+            #expect(NotificationPermissionRow.offer(for: .denied, asks: asks) == .openSystemSettings)
+        }
+        // Asked for, and still not allowed: the system will not ask again.
+        try withScratchAsks(asked: [.notifications]) { asks in
+            #expect(NotificationPermissionRow.offer(for: .notDetermined, asks: asks) == .openSystemSettings)
+            #expect(NotificationPermissionRow.offer(for: .denied, asks: asks) == .openSystemSettings)
+        }
+        // What was asked for is per permission: Screen Recording being asked for says nothing about notifications.
+        try withScratchAsks(asked: [.screenRecording]) { asks in
+            #expect(NotificationPermissionRow.offer(for: .notDetermined, asks: asks) == .allow)
+        }
     }
 
     @Test("A sound menu offers every system sound, and one that is in use but not among them")

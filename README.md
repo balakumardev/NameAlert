@@ -52,7 +52,7 @@ Speech transcription runs on your Mac, and your audio never leaves it. NameAlert
 
 Prerequisites:
 - Xcode 26 or later.
-- XcodeGen.
+- XcodeGen. CI pins XcodeGen 2.46.0, and `brew install xcodegen` works with 2.44 or later.
 
 ```bash
 # Install XcodeGen
