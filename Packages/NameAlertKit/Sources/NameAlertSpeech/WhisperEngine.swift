@@ -14,8 +14,8 @@ import os
 /// finishes.
 ///
 /// **Threads.** The models live in a `WhisperContext`, which makes every call into the C library on one serial
-/// dispatch queue and lets the engine wait for it without blocking a thread. While a decode runs, the capture source
-/// holds on to the chunks that arrive; it keeps the newest few seconds for a consumer that falls behind. The engine's
+/// dispatch queue and lets the engine wait for it without blocking a thread. While a decode runs, the chunks that
+/// arrive wait in the audio stream; the app keeps the newest 60 s of them for an engine that falls behind. The engine's
 /// own state (the loaded models, the prompt) belongs to the actor. `transcribe` has to return at once, so it is not
 /// isolated to the actor: it records its run under a lock, which is how a `stop` that comes right after it always
 /// ends that run.
@@ -25,10 +25,11 @@ import os
 /// speech, and notes about non-speech such as "[BLANK_AUDIO]" are taken out (see `WhisperOutput`).
 ///
 /// **Keeping up.** Each decode's time is compared with the length of its audio (`RealTimeGuard`). When the model
-/// falls behind, `onFallingBehind` is called, once each time that happens. While the Light model is behind, segments
-/// whose audio ended more than 10 s before the live audio are skipped, so the engine catches up instead of reporting
-/// old speech late (only how many is logged). With the app's capture sources this rarely happens: they keep about 5 s
-/// for a slow consumer and drop older audio themselves.
+/// falls behind, `onFallingBehind` is called, and again on each later segment that is still too slow, at most once
+/// every 30 s (`FallingBehindReporter`): an owner that takes its warning back after a quiet spell must not do so while
+/// the model is still behind. While the Light model is behind, segments whose audio ended more than 10 s before the
+/// live audio are skipped, so the engine catches up instead of reporting old speech late (only how many is logged).
+/// In the app, the audio stream drops chunks older than 60 s, so an engine lags by about a minute at most.
 ///
 /// **Lifetime.** `prepare` loads the models, `transcribe` runs one stream at a time (a new one ends the one before),
 /// and `stop` ends the stream, waits for its task and frees the models. The engine can be prepared again after `stop`.
@@ -57,7 +58,8 @@ public actor WhisperEngine: SpeechEngine {
     /// The latest `transcribe`, until `stop` or the next `transcribe` ends it.
     private nonisolated let latestRun = OSAllocatedUnfairLock<TranscriptionRun?>(initialState: nil)
 
-    /// `onFallingBehind` is called, from the engine, each time the model starts falling behind the audio.
+    /// `onFallingBehind` is called, from the engine, when the model starts falling behind the audio, and then at most
+    /// every 30 s for as long as it stays behind.
     public init(size: LocalModelSize, modelManager: ModelManager, onFallingBehind: @escaping @Sendable () -> Void = {}) {
         self.id =
             switch size {
@@ -280,7 +282,8 @@ public actor WhisperEngine: SpeechEngine {
             language: context.language, prompt: prompt, processorCount: ProcessInfo.processInfo.activeProcessorCount)
         let started = ContinuousClock.now
         let result = await context.transcribe(segment.samples, options: options)
-        let processingSeconds = (ContinuousClock.now - started).inSeconds
+        let finished = ContinuousClock.now
+        let processingSeconds = (finished - started).inSeconds
 
         switch result {
         case .cancelled:
@@ -298,8 +301,9 @@ public actor WhisperEngine: SpeechEngine {
                 logger.notice(
                     "The local model is falling behind: \(processingSeconds, format: .fixed(precision: 2)) s for \(audioSeconds, format: .fixed(precision: 2)) s of audio"
                 )
-                onFallingBehind()
             }
+            // Not only when it starts: the owner's warning goes away by itself unless it keeps hearing about this.
+            if state.reports.shouldReport(behind: behind, at: finished) { onFallingBehind() }
             state.isBehind = behind
             if let text = WhisperOutput.text(of: parts) {
                 logger.debug("Heard: \(text, privacy: .private)")
@@ -328,6 +332,8 @@ private struct ListeningState {
     var realTime = RealTimeGuard()
     /// What `realTime` said about the latest decode.
     var isBehind = false
+    /// When the owner is told about it.
+    var reports = FallingBehindReporter()
     var liveLag = LiveLag()
     /// How far behind the live audio the newest chunk was, in seconds.
     var lag = 0.0
@@ -360,6 +366,27 @@ private struct FrameBuffer {
 }
 
 // MARK: - Falling behind
+
+/// Decides which decodes tell the engine's owner that the local model is behind.
+///
+/// The owner takes its warning back after a quiet spell, so a model that stays behind has to keep saying so: the decode
+/// that makes it fall behind is reported at once, and so is each later one that is still too slow, but never within
+/// `interval` of the last report.
+struct FallingBehindReporter: Sendable {
+    /// Well inside the owner's quiet spell (two minutes), so that one late report does not let the warning go away.
+    static let interval = Duration.seconds(30)
+
+    private var lastReport: ContinuousClock.Instant?
+
+    /// Whether to report the decode that finished at `now`. `behind` is what the `RealTimeGuard` said about it: true
+    /// while the model is falling behind, which means this decode was too slow as well.
+    mutating func shouldReport(behind: Bool, at now: ContinuousClock.Instant) -> Bool {
+        guard behind else { return false }
+        if let lastReport, now - lastReport < Self.interval { return false }
+        lastReport = now
+        return true
+    }
+}
 
 /// Estimates how far behind the live audio the engine is, so that it can skip old speech when it cannot keep up.
 ///

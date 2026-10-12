@@ -226,6 +226,61 @@ struct WhisperEngineTests {
         #expect(lag.update(sequence: 0, at: 200, waited: false) == 0)
     }
 
+    /// A run of decodes, judged by `RealTimeGuard` and reported by `FallingBehindReporter` the way
+    /// `WhisperEngine.decode` does it.
+    private final class Decodes {  // a class, because `#expect` does not take a mutating call
+        private var watch = RealTimeGuard()
+        private var reporter = FallingBehindReporter()
+        private let start = ContinuousClock.now
+
+        /// Records a decode that took `processing` s for 1 s of audio and finished `second` s after the start.
+        /// Returns whether the engine's owner would be told that the model is behind.
+        func reported(_ processing: Double, at second: Int) -> Bool {
+            let behind = watch.record(processingSeconds: processing, audioSeconds: 1)
+            return reporter.shouldReport(behind: behind, at: start + .seconds(second))
+        }
+    }
+
+    @Test func fallingBehindIsReportedAgainWhileItLasts() {
+        let decodes = Decodes()
+        // The third slow decode in a row makes the model fall behind, and the owner hears of it at once.
+        #expect(!decodes.reported(0.9, at: 0))
+        #expect(!decodes.reported(0.9, at: 1))
+        #expect(decodes.reported(0.9, at: 2))
+        // Still too slow, but the owner heard 1 s ago, and 29 s ago.
+        #expect(!decodes.reported(0.9, at: 3))
+        #expect(!decodes.reported(5, at: 31))
+        // The first slow decode 30 s after that report says so again, and the next 30 s count from this one.
+        #expect(decodes.reported(0.9, at: 32))
+        #expect(!decodes.reported(0.9, at: 61))
+        #expect(decodes.reported(0.9, at: 62))
+        // Minutes more of a model that never catches up: the owner hears every 30 s, so a warning that goes away after
+        // two quiet minutes never does.
+        let reports = stride(from: 63, through: 200, by: 1).filter { decodes.reported(0.9, at: $0) }
+        #expect(reports == [92, 122, 152, 182])
+    }
+
+    @Test func aModelThatCatchesUpIsNotReported() {
+        let decodes = Decodes()
+        #expect(!decodes.reported(0.9, at: 0))
+        #expect(!decodes.reported(0.9, at: 1))
+        #expect(decodes.reported(0.9, at: 2))
+        // A decode at the limit keeps up, so there is nothing to say, and the count of slow ones starts over.
+        #expect(!decodes.reported(0.8, at: 3))
+        #expect(!decodes.reported(0.9, at: 4))
+        #expect(!decodes.reported(0.9, at: 5))
+        // Behind again at 6 s, 4 s after that report: the owner is not told again until 30 s have passed.
+        #expect(!decodes.reported(0.9, at: 6))
+        #expect(decodes.reported(0.9, at: 32))
+        // Caught up, and for as long as it stays caught up: nothing to say.
+        #expect(!decodes.reported(0.5, at: 33))
+        #expect(!decodes.reported(0.5, at: 500))
+        // Behind again long after the last report: reported at once.
+        #expect(!decodes.reported(0.9, at: 600))
+        #expect(!decodes.reported(0.9, at: 601))
+        #expect(decodes.reported(0.9, at: 602))
+    }
+
     // MARK: Engine
 
     @Test func prepareThrowsWhenModelMissing() async throws {
