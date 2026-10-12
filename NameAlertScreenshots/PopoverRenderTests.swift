@@ -129,9 +129,7 @@ struct PopoverRenderTests {
             configuration: configuration, permissions: permissions, history: Array(DemoFixtures.hits.prefix(2)))
         await controller.start()
         // The attempt that finds the permission missing runs in the background: wait for its result.
-        for _ in 0..<150 where controller.state != .error(issue) {
-            try? await Task.sleep(for: .milliseconds(20))
-        }
+        await pollUntil { controller.state == .error(issue) }
         return controller
     }
 
@@ -385,7 +383,7 @@ struct PopoverLogicTests {
     }
 
     @Test("The popover reads the permissions again when it opens, and whenever a window becomes key")
-    func popoverRefreshesPermissions() async throws {
+    func popoverRefreshesPermissions() async {
         let start = PermissionsSnapshot(
             microphone: .granted, screenRecording: .granted, speechRecognition: .granted, notifications: .notDetermined)
         let permissions = ChangingPermissions(start)
@@ -404,7 +402,7 @@ struct PopoverLogicTests {
         defer { window.contentView = nil }
 
         // Opening reads them.
-        try await Task.sleep(for: .milliseconds(400))
+        await pollUntil { controller.permissions == start }
         #expect(controller.permissions == start)
 
         // One was turned on in System Settings; the popover is opened again, and its window becomes key.
@@ -412,7 +410,7 @@ struct PopoverLogicTests {
         later.notifications = .granted
         permissions.set(later)
         NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
-        try await Task.sleep(for: .milliseconds(400))
+        await pollUntil { controller.permissions == later }
         #expect(controller.permissions == later)
     }
 
@@ -493,6 +491,19 @@ func withScratchAsks<T>(asked: [PermissionKind] = [], _ body: (PermissionAsks) t
 
 enum ScratchError: Error {
     case noSuite
+}
+
+/// Waits until `condition` holds: it is looked at every 20 ms, for at most `timeout`. Returns whether it held in time.
+/// A test checks what it waited for afterwards, so that running out of time shows as the failed expectation it is.
+@MainActor
+@discardableResult
+func pollUntil(timeout: Duration = .seconds(3), _ condition: @MainActor () -> Bool) async -> Bool {
+    let deadline = ContinuousClock.now + timeout
+    while !condition() {
+        if ContinuousClock.now >= deadline { return false }
+        do { try await Task.sleep(for: .milliseconds(20)) } catch { return condition() }  // the test was cancelled
+    }
+    return true
 }
 
 /// Permissions that can be changed while a test runs.
