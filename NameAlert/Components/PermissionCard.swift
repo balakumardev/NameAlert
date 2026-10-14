@@ -11,6 +11,8 @@ struct PermissionCard: View {
     var isOptional = false
     /// Screen Recording is allowed, but listening may only see it once the app has opened again.
     var showsRelaunch = false
+    /// Where another copy of the app is, which macOS may open instead of this one (`OtherCopies.note(for:)`).
+    var otherCopyNote: String?
     var allow: () -> Void = {}
     var openSettings: () -> Void = {}
     var relaunch: () -> Void = {}
@@ -54,6 +56,16 @@ struct PermissionCard: View {
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+                if let otherCopyNote {
+                    Label {
+                        Text(verbatim: otherCopyNote)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    }
+                    .font(.callout)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

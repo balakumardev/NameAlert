@@ -12,6 +12,8 @@ struct PermissionsStep: View {
 
     /// Which permissions were asked for, in this setup or an earlier run; the app's own unless a test brings one.
     var asks: PermissionAsks = .shared
+    /// The other copies of the app LaunchServices knows about; the app's own unless a test brings some.
+    var otherCopies: OtherCopies = .shared
 
     @Environment(ListeningController.self) private var controller
 
@@ -64,6 +66,7 @@ struct PermissionsStep: View {
             showsRelaunch: Self.showsRelaunch(
                 kind, status: status, wasOff: model.screenRecordingWasOff,
                 needsRelaunch: controller.warnings.contains(.screenRecordingNeedsRelaunch)),
+            otherCopyNote: Self.otherCopyNote(kind, status: status, copies: otherCopies.urls),
             allow: { allow(kind) },
             openSettings: { openSettings(kind) },
             relaunch: relaunch)
@@ -98,5 +101,11 @@ struct PermissionsStep: View {
     /// (macOS usually wants the app opened again for it to see the change) or capture was refused although it is.
     static func showsRelaunch(_ kind: PermissionKind, status: PermissionStatus, wasOff: Bool, needsRelaunch: Bool) -> Bool {
         kind == .screenRecording && status == .granted && (wasOff || needsRelaunch)
+    }
+
+    /// The note about another copy of the app, on the Screen Recording card until it is allowed: allowing it is when
+    /// macOS asks to quit and reopen the app, and may open the other copy.
+    static func otherCopyNote(_ kind: PermissionKind, status: PermissionStatus, copies: [URL]) -> String? {
+        kind == .screenRecording && status != .granted ? OtherCopies.note(for: copies) : nil
     }
 }

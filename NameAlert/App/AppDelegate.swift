@@ -25,11 +25,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         environment.launch()
     }
 
-    /// Permission problems are not retried on their own; they are checked again whenever the app comes forward.
+    /// Permission problems are not retried on their own; they are checked again whenever the app comes forward, and so
+    /// are the other copies of the app (one may have been deleted).
     func applicationDidBecomeActive(_ notification: Notification) {
         guard AppEnvironment.isLive else { return }
         let controller = environment.controller
         Task { await controller.refreshPermissions() }
+        OtherCopies.shared.refresh()
     }
 
     /// The app was opened again while it runs. It has no Dock icon to click, so this is how someone who opened it from

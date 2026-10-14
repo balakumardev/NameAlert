@@ -48,6 +48,14 @@ final class AppEnvironment {
             logger.info("Running under tests: not loading settings or listening")
             return
         }
+        let copies = OtherCopies.shared
+        copies.refresh()
+        if let other = copies.urls.first {
+            logger.notice("""
+                Other copies macOS may open instead of this one: \(copies.urls.count, privacy: .public), \
+                the first at \(other.path, privacy: .private)
+                """)
+        }
         Task {
             await ensureStartedUp()
             if !controller.configuration.hasCompletedOnboarding {

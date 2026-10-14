@@ -90,6 +90,9 @@ struct PopoverHeader: View {
 /// Under the header: what went wrong with the button that fixes it, then the warnings, then the hint that
 /// notifications are off. Nothing when all is well.
 struct PopoverNotices: View {
+    /// The other copies of the app LaunchServices knows about; the app's own unless a test brings some.
+    var otherCopies: OtherCopies = .shared
+
     @Environment(ListeningController.self) private var controller
 
     var body: some View {
@@ -104,6 +107,9 @@ struct PopoverNotices: View {
                 }
                 ForEach(warnings, id: \.self) { warning in
                     WarningNotice(warning: warning)
+                }
+                if let note = Self.otherCopyNote(issue: issue, warnings: warnings, copies: otherCopies.urls) {
+                    NoticeRow(systemImage: "exclamationmark.triangle.fill", tint: .orange, message: note)
                 }
                 if notificationsAreOff {
                     NotificationsOffNotice()
@@ -135,6 +141,14 @@ struct PopoverNotices: View {
             guard warnings.contains(warning) else { return false }
             return !(warning == .screenRecordingNeedsRelaunch && issue == .permissionDenied(.screenRecording))
         }
+    }
+
+    /// The note about another copy of the app goes with a Screen Recording problem: allowing it, or relaunching for
+    /// it, is when macOS may open the other copy.
+    static func otherCopyNote(issue: ListeningIssue?, warnings: [RuntimeWarning], copies: [URL]) -> String? {
+        let screenRecording =
+            issue == .permissionDenied(.screenRecording) || warnings.contains(.screenRecordingNeedsRelaunch)
+        return screenRecording ? OtherCopies.note(for: copies) : nil
     }
 }
 

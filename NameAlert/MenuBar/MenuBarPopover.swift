@@ -45,8 +45,12 @@ struct MenuBarPopover: View {
             PopoverFooter()
         }
         .frame(width: Self.width)
-        // A permission may have been turned on or off since the popover was last open: look again when it opens.
-        .task { await controller.refreshPermissions() }
+        // A permission may have been turned on or off since the popover was last open, or another copy of the app
+        // deleted: look again when it opens.
+        .task {
+            if AppEnvironment.isLive { OtherCopies.shared.refresh() }
+            await controller.refreshPermissions()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             Task { await controller.refreshPermissions() }
         }

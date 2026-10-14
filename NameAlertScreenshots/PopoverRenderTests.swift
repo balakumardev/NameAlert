@@ -437,6 +437,21 @@ struct PopoverLogicTests {
         }
     }
 
+    @Test("Another copy of the app is mentioned with a Screen Recording problem, and only then")
+    func otherCopyNote() {
+        let copies = [URL(fileURLWithPath: "/Users/someone/Downloads/NameAlert.app", isDirectory: true)]
+        let note = OtherCopies.note(for: copies)
+        #expect(note != nil)
+        #expect(PopoverNotices.otherCopyNote(issue: .permissionDenied(.screenRecording), warnings: [], copies: copies)
+            == note)
+        #expect(PopoverNotices.otherCopyNote(issue: nil, warnings: [.screenRecordingNeedsRelaunch], copies: copies)
+            == note)
+        #expect(PopoverNotices.otherCopyNote(issue: .permissionDenied(.microphone), warnings: [], copies: copies) == nil)
+        #expect(PopoverNotices.otherCopyNote(issue: nil, warnings: [.localModelFallingBehind], copies: copies) == nil)
+        #expect(PopoverNotices.otherCopyNote(issue: .permissionDenied(.screenRecording), warnings: [], copies: [])
+            == nil)
+    }
+
     @Test("The live strip shows the end of the transcript from a word start")
     func liveSnippet() {
         #expect(LiveStrip.snippet(of: "  hello   there ") == "hello there")

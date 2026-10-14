@@ -686,6 +686,55 @@ struct OnboardingLogicTests {
             microphone: .denied, screenRecording: .denied, speechRecognition: .denied, notifications: .denied)))
     }
 
+    // MARK: Other copies of the app
+
+    @Test("Another registered copy is found by its path, however it is spelled, and the running copy is not")
+    func otherCopies() throws {
+        let running = URL(fileURLWithPath: "/Applications/NameAlert.app", isDirectory: true)
+        let other = URL(fileURLWithPath: "/Users/someone/Downloads/NameAlert.app", isDirectory: true)
+        #expect(OtherCopies.others(of: running, among: []) == [])
+        #expect(OtherCopies.others(of: running, among: [running]) == [])
+        #expect(OtherCopies.others(of: running, among: [other, running]) == [other])
+        // The running copy spelled another way, and the other copy twice.
+        let respelled = URL(fileURLWithPath: "/Applications/Utilities/../NameAlert.app/", isDirectory: true)
+        #expect(OtherCopies.others(of: running, among: [respelled, other, other]) == [other])
+
+        // A symbolic link to the running copy is the running copy.
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("other-copies-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let app = folder.appendingPathComponent("NameAlert.app", isDirectory: true)
+        try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+        let link = folder.appendingPathComponent("Link.app", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: app)
+        #expect(OtherCopies.others(of: app, among: [link, other]) == [other])
+        #expect(OtherCopies.others(of: link, among: [app]) == [])
+
+        // A copy Gatekeeper runs from a random folder cannot tell which registered copy it is.
+        let translocated = URL(
+            fileURLWithPath: "/private/var/folders/ab/xyz/T/AppTranslocation/0A1B/d/NameAlert.app", isDirectory: true)
+        #expect(OtherCopies.others(of: translocated, among: [other]) == [])
+    }
+
+    @Test("The note says where the other copy is and what to do, on the Screen Recording card until it is allowed")
+    func otherCopyNote() {
+        let other = URL(fileURLWithPath: "/Users/someone/Downloads/NameAlert.app", isDirectory: true)
+        let second = URL(fileURLWithPath: "/Applications/NameAlert.app", isDirectory: true)
+        #expect(OtherCopies.note(for: []) == nil)
+        #expect(OtherCopies.note(for: [other, second]) == """
+            Another copy of \(AppInfo.displayName) is at /Users/someone/Downloads/NameAlert.app. After you allow Screen \
+            Recording, macOS may open that copy instead. Delete it, then open this one.
+            """)
+
+        let rule = PermissionsStep.otherCopyNote
+        #expect(rule(.screenRecording, .notDetermined, [other]) == OtherCopies.note(for: [other]))
+        #expect(rule(.screenRecording, .denied, [other]) == OtherCopies.note(for: [other]))
+        #expect(rule(.screenRecording, .granted, [other]) == nil)
+        #expect(rule(.microphone, .notDetermined, [other]) == nil)
+        #expect(rule(.screenRecording, .notDetermined, []) == nil)
+        #expect(OtherCopies(urls: [other]).urls == [other])
+        #expect(OtherCopies().urls.isEmpty)
+    }
+
     // MARK: The engine and the test
 
     @Test("The engine step says what the brief says, and when it can start")
