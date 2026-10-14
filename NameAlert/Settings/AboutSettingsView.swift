@@ -157,6 +157,8 @@ struct AboutSettingsView: View {
 enum AboutLinks {
     static let support = address("https://balakumardev.github.io/NameAlert/support.html")
     static let privacy = address("https://balakumardev.github.io/NameAlert/privacy.html")
+    /// Apple's standard license for App Store apps: the Terms of Use of Pro.
+    static let terms = address("https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")
 
     private static func address(_ text: String) -> URL {
         // A fixed address: the tests read each one back.

@@ -119,8 +119,10 @@ enum DemoFixtures {
 
     static func controller(
         _ state: ListeningState, hits: [Hit] = [], transcript: String = "", level: Double = 0,
-        configuration: AppConfiguration = configuration
+        configuration: AppConfiguration = configuration, proAccess: ProAccess = .pro
     ) -> ListeningController {
-        .demo(configuration: configuration, state: state, recentHits: hits, liveTranscript: transcript, level: level)
+        .demo(
+            configuration: configuration, state: state, recentHits: hits, liveTranscript: transcript, level: level,
+            proAccess: proAccess)
     }
 }

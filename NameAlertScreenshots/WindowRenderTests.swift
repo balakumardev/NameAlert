@@ -104,6 +104,7 @@ struct HistoryApiAboutRenderTests {
                 .environment(WindowRouter())
                 .environment(SecretsModel(store: InMemorySecretStore()))
                 .environment(\.speechCapabilities, { capabilities })
+                .environment(presentedStore(.free))
         }
         let hosting = NSHostingView(rootView: root)
         hosting.frame = CGRect(origin: .zero, size: paneSize)

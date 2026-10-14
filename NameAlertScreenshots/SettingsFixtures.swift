@@ -44,7 +44,7 @@ enum SettingsFixtures {
         failingChannels: [ChannelKind: any Error] = [:],
         capabilities: EngineCapabilities = SettingsFixtures.capabilities,
         history: [Hit] = [],
-        startsStalledDownloads: Bool = true
+        startsStalledDownloads: Bool = true, proAccess: ProAccess = .pro
     ) async -> ListeningController {
         var dependencies = RuntimeDependencies.inert()
         dependencies.models = FakeModels(installed: installedModels, stalled: stalledDownloads)
@@ -64,7 +64,7 @@ enum SettingsFixtures {
         var configuration = configuration
         configuration.hasCompletedOnboarding = true
         configuration.listening.startOnLaunch = false
-        let controller = ListeningController(dependencies: dependencies)
+        let controller = ListeningController(dependencies: dependencies, proAccess: proAccess)
         await controller.update { $0 = configuration }
         await controller.bootstrap()
         if startsStalledDownloads {
