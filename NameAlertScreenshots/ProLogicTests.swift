@@ -40,7 +40,7 @@ struct ProLogicTests {
             [
                 ProCopy.tagline, ProCopy.freeKeeps, ProCopy.oneTime, ProCopy.restoreHint,
                 ProCopy.checking, ProCopy.loadingPrice, ProCopy.priceDidNotLoad, ProCopy.pending, ProCopy.owned,
-                ProCopy.restored, ProCopy.nothingFound, ProCopy.unverifiedPurchase,
+                ProCopy.restored, ProCopy.nothingFound, ProCopy.unverifiedPurchase, ProCopy.unverifiedRestore,
                 ProCopy.ruleLimitTitle, ProCopy.ruleLimitMessage, ProCopy.channelMessage, ProCopy.ruleHeldBack,
                 ProCopy.channelSectionNote, ProCopy.popoverRuleLimit, ProCopy.webhookIsPro,
             ] + ProCopy.proAdds

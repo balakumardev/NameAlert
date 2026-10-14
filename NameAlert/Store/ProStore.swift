@@ -58,6 +58,8 @@ final class ProStore {
     /// purchase is dropped once a read has it (`stillHandedOver`): from then on the reads decide, so an App Store sign-in
     /// to another Apple Account turns Pro off. A refund stays.
     @ObservationIgnored private(set) var handedOver: [UInt64: ProTransaction] = [:]
+    /// The latest read found a newest transaction of Pro that does not verify: Restore says so, not "nothing found".
+    @ObservationIgnored private var newestIsUnverified = false
     @ObservationIgnored private var onAccessChange: (@MainActor (ProAccess) -> Void)?
     /// Set by `present`: a state shown for a render, with nothing read or bought.
     @ObservationIgnored private var isPresented = false
@@ -118,10 +120,11 @@ final class ProStore {
     func refresh() async {
         guard isEnforced, !isPresented else { return }
         let ticket = refreshOrder.begin()
-        let read = await Task.detached { await ProStore.currentProTransactions() }.value
+        let read = await Task.detached { await ProStore.readPurchases() }.value
         guard refreshOrder.shouldApply(ticket) else { return }
-        apply(ProEntitlement(transactions: Array(Self.merge(read, handedOver).values)))
-        handedOver = Self.stillHandedOver(handedOver, after: read)
+        newestIsUnverified = read.isUnverified
+        apply(ProEntitlement(transactions: Array(Self.merge(read.transactions, handedOver).values)))
+        handedOver = Self.stillHandedOver(handedOver, after: read.transactions)
     }
 
     /// Loads the product, unless it is loading already. A product that loaded before stays when a later load fails.
@@ -184,7 +187,11 @@ final class ProStore {
             return
         }
         await refresh()
-        restoreState = access == .pro ? .restored : .nothingFound
+        if access == .pro {
+            restoreState = .restored
+        } else {
+            restoreState = newestIsUnverified ? .failed(ProCopy.unverifiedRestore) : .nothingFound
+        }
     }
 
     /// Shows a state as it is, for renders and screenshots: nothing is read or bought afterwards.
@@ -238,14 +245,28 @@ final class ProStore {
         await transaction.finish()
     }
 
-    /// The newest transaction of Pro, when it verifies, by its ID; it carries a refund as its `revocationDate`. Read
-    /// through `Transaction.latest(for:)`, which was up to date the moment a purchase returned and when
-    /// `Transaction.updates` delivered a purchase or a refund. `Transaction.currentEntitlements` still lacked a new
-    /// purchase for about 0.4 s then (StoreKit testing, 2026-10-14). Either can lag behind a purchase made elsewhere for
-    /// a moment, which `handedOver` covers.
-    nonisolated private static func currentProTransactions() async -> [UInt64: ProTransaction] {
-        guard case .verified(let transaction)? = await Transaction.latest(for: ProProduct.id) else { return [:] }
-        return [transaction.id: ProTransaction(transaction)]
+    /// One read of the purchases: the newest transaction of Pro by its ID, when it verifies, and whether it did not.
+    private struct Read: Sendable {
+        var transactions: [UInt64: ProTransaction] = [:]
+        var isUnverified = false
+    }
+
+    /// The newest transaction of Pro; it carries a refund as its `revocationDate`. Read through
+    /// `Transaction.latest(for:)`, which was up to date the moment a purchase returned and when `Transaction.updates`
+    /// delivered a purchase or a refund. `Transaction.currentEntitlements` still lacked a new purchase for about 0.4 s
+    /// then (StoreKit testing, 2026-10-14). Either can lag behind a purchase made elsewhere for a moment, which
+    /// `handedOver` covers. One that does not verify unlocks nothing, and its error is logged.
+    nonisolated private static func readPurchases() async -> Read {
+        switch await Transaction.latest(for: ProProduct.id) {
+        case .verified(let transaction)?:
+            return Read(transactions: [transaction.id: ProTransaction(transaction)])
+        case .unverified(_, let error)?:
+            Log.logger("store").error(
+                "The newest App Store transaction of Pro could not be verified: \(error.localizedDescription, privacy: .public)")
+            return Read(isUnverified: true)
+        case nil:
+            return Read()
+        }
     }
 
     private func apply(_ entitlement: ProEntitlement) {

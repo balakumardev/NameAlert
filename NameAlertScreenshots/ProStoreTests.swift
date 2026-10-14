@@ -308,6 +308,24 @@ struct ProStoreTests {
         #expect(ProStore.stillHandedOver([7: bought, 8: refunded], after: [7: bought]) == [8: refunded])
     }
 
+    @Test("A purchase the App Store cannot verify unlocks nothing, and Restore says so")
+    func unverifiedPurchase() async throws {
+        let h = try await StoreHarness()
+        defer { h.finish() }
+        #expect(await h.startAndWait())
+        try await h.session.setSimulatedError(.verification(.invalidSignature), forAPI: .verification)
+        try await h.session.buyProduct(identifier: ProProduct.id)
+        // StoreKit has the purchase once its newest transaction can be read, unverified as it is.
+        let deadline = ContinuousClock.now + .seconds(10)
+        while await StoreKit.Transaction.latest(for: ProProduct.id) == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        await h.store.restore(using: {})
+        #expect(h.store.access == .free)
+        #expect(h.store.restoreState == .failed(ProCopy.unverifiedRestore))
+        try await h.session.setSimulatedError(nil, forAPI: .verification)
+    }
+
     @Test("A closed App Store sheet is not a failure")
     func cancellation() {
         #expect(ProStore.isCancellation(StoreKitError.userCancelled))

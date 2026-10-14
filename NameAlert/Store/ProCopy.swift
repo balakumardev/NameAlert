@@ -35,6 +35,7 @@ enum ProCopy {
     static let restored = "Your purchase is restored."
     static let nothingFound = "No Pro purchase was found for the Apple Account this Mac uses for the App Store."
     static let unverifiedPurchase = "The App Store couldn't confirm the purchase, so Pro stays off. Try Restore Purchases."
+    static let unverifiedRestore = "The App Store couldn't confirm the purchase, so Pro stays off. Try again later."
     static func purchaseFailed(_ error: any Error) -> String {
         "The purchase didn't go through: \(error.localizedDescription)"
     }
