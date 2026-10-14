@@ -1,6 +1,6 @@
 import NameAlertCore
 
-/// The state of every permission NameAlert uses, at one moment.
+/// The state of every permission Takeheed uses, at one moment.
 public struct PermissionsSnapshot: Equatable, Sendable {
     public var microphone: PermissionStatus
     public var screenRecording: PermissionStatus

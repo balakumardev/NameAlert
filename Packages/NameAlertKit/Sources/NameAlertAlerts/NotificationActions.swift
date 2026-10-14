@@ -13,7 +13,7 @@ public enum NotificationActions {
 
     private static let logger = Log.logger("notifications")
 
-    /// Makes the notification category known to the system. NameAlert has only this one, so it replaces the others.
+    /// Makes the notification category known to the system. Takeheed has only this one, so it replaces the others.
     public static func register() {
         UNUserNotificationCenter.current().setNotificationCategories([makeCategory()])
     }

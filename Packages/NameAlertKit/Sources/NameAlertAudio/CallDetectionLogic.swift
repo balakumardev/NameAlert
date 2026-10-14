@@ -27,7 +27,7 @@ public struct AudioProcessSnapshot: Sendable, Equatable {
 /// recording from the microphone. It does not talk to Core Audio: the caller passes what it saw and when, which keeps
 /// the rules testable without a microphone.
 ///
-/// A process counts while it is recording, unless it is NameAlert itself (by process ID or bundle ID) or one of the
+/// A process counts while it is recording, unless it is Takeheed itself (by process ID or bundle ID) or one of the
 /// system's own listeners that record all day (`ignoredBundleIDs`). Apps are told apart by bundle ID, so the many
 /// helper processes of one app are one entry; a process without a bundle ID is `pid:<n>`. Bundle IDs are compared
 /// without regard to case, because Core Audio hands them over as the app spells them (Arc's helpers are
@@ -78,8 +78,8 @@ public struct CallDetectionLogic: Sendable {
     private var lastSighting: Sighting?
 
     /// - Parameters:
-    ///   - ownPID: The process ID of NameAlert, whose own recording is not a call.
-    ///   - ownBundleID: The bundle ID of NameAlert.
+    ///   - ownPID: The process ID of Takeheed, whose own recording is not a call.
+    ///   - ownBundleID: The bundle ID of Takeheed.
     ///   - browserDelay: How long, in seconds, a browser has to be recording before it counts.
     ///   - grace: How long, in seconds, the call lasts after the last time anything counted.
     public init(ownPID: Int32, ownBundleID: String, browserDelay: TimeInterval = 3, grace: TimeInterval = 8) {

@@ -2,7 +2,7 @@ import NameAlertCore
 import NameAlertRuntime
 import SwiftUI
 
-/// The top of the popover: a colored dot and what NameAlert is doing, the speech engine under it, and the
+/// The top of the popover: a colored dot and what Takeheed is doing, the speech engine under it, and the
 /// pause / play button.
 struct PopoverHeader: View {
     @Environment(ListeningController.self) private var controller

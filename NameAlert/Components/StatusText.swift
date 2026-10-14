@@ -3,7 +3,7 @@ import NameAlertCore
 import NameAlertRuntime
 import SwiftUI
 
-/// One line saying what NameAlert is doing: "Listening · System audio", "Paused", "Snoozed until 10:45",
+/// One line saying what Takeheed is doing: "Listening · System audio", "Paused", "Snoozed until 10:45",
 /// "Downloading speech model… 45%", or what went wrong. Its helpers name sources, engines and problems for any other
 /// screen that shows them.
 struct StatusText: View {

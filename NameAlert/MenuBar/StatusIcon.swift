@@ -3,7 +3,7 @@ import NameAlertCore
 import NameAlertRuntime
 import SwiftUI
 
-/// The menu bar icon. It shows what NameAlert is doing and, because it lives as long as the app does, it is also the
+/// The menu bar icon. It shows what Takeheed is doing and, because it lives as long as the app does, it is also the
 /// view that opens the windows `WindowRouter` is asked for.
 struct StatusIcon: View {
     @Environment(ListeningController.self) private var controller

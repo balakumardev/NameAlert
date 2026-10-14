@@ -11,8 +11,8 @@
 #   DERIVED_DATA      passed to xcodebuild as -derivedDataPath
 #
 # How: xcodegen, then `xcodebuild test` on the Screenshots scheme, running only AppStoreScreenshotTests. That test runs
-# inside ScreenshotHost, an app made from NameAlert's sources without its @main, Info.plist or entitlements, so
-# NameAlert itself is never started: nothing listens, nothing is downloaded or sent, and the views read no real
+# inside ScreenshotHost, an app made from Takeheed's sources without its @main, Info.plist or entitlements, so
+# Takeheed itself is never started: nothing listens, nothing is downloaded or sent, and the views read no real
 # settings or Keychain item (they get demo data and inert stand-ins). The test draws each screen offscreen, puts it on
 # the brand gradient with its headline and writes the PNG. This script checks every PNG with sips (2880 x 1800, no
 # alpha) in a scratch folder first, and copies them into appstore/screenshots/ only when all of them pass.

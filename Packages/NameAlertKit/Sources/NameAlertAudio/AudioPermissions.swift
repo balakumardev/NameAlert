@@ -24,7 +24,7 @@ public enum AudioPermissions {
     }
 
     /// Shows the system's screen recording prompt the first time; after that it only reports the current state.
-    /// ScreenCaptureKit may only see a new grant after NameAlert relaunches.
+    /// ScreenCaptureKit may only see a new grant after Takeheed relaunches.
     public static func requestScreenRecording() -> Bool {
         CGRequestScreenCaptureAccess()
     }

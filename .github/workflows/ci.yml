@@ -1,6 +1,6 @@
 name: CI
 
-# Builds and tests NameAlert on GitHub-hosted runners. No secrets here, so it is safe on pull requests.
+# Builds and tests Takeheed on GitHub-hosted runners. No secrets here, so it is safe on pull requests.
 #
 #   xcode-27        The build, on GitHub's preview image with Xcode 27: swift test, an unsigned universal Release
 #                   build that must produce no warnings in NameAlert/ or Packages/, and the Screenshots scheme

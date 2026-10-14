@@ -30,7 +30,7 @@ public struct ModelDescriptor: Sendable, Equatable {
     }
 }
 
-/// The models NameAlert can download.
+/// The models Takeheed can download.
 ///
 /// Every file is pinned. It is fetched from one fixed revision of its repository, never from the latest one, and its
 /// size and SHA-256 are checked after the download (see `ModelManager`). The values are the table in spec section 8.6.

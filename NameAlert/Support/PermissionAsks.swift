@@ -3,7 +3,7 @@ import NameAlertCore
 import NameAlertRuntime
 import Observation
 
-/// Which permissions NameAlert has already asked the system for, kept across launches.
+/// Which permissions Takeheed has already asked the system for, kept across launches.
 ///
 /// macOS never says whether Screen Recording was refused, and it does not ask again about notifications it asked about
 /// once: after a request, "not allowed" can only mean "turn it on in System Settings". So for those two a fix that offers

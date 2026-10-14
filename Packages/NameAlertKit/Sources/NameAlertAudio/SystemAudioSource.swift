@@ -4,7 +4,7 @@ import Foundation
 import NameAlertCore
 import ScreenCaptureKit
 
-/// Captures what the Mac plays (calls, videos, music) with ScreenCaptureKit, leaving out NameAlert's own sounds.
+/// Captures what the Mac plays (calls, videos, music) with ScreenCaptureKit, leaving out Takeheed's own sounds.
 ///
 /// The stream captures 48 kHz mono audio from the first display, with our app excluded from the filter and
 /// `excludesCurrentProcessAudio` set, so alert sounds never come back as input. ScreenCaptureKit insists on video as

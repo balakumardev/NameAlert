@@ -1,7 +1,7 @@
 /// Where audio is captured from.
 public enum AudioSourceKind: String, Codable, Sendable, CaseIterable { case systemAudio, microphone, both }
 
-/// Whether NameAlert listens all the time or only while a call is running.
+/// Whether Takeheed listens all the time or only while a call is running.
 public enum ListeningMode: String, Codable, Sendable, CaseIterable { case always, duringCalls }
 
 /// Which speech recognizer the user prefers; `automatic` lets the app pick.
@@ -13,7 +13,7 @@ public enum LocalModelSize: String, Codable, Sendable, CaseIterable { case light
 /// How forgiving name matching is.
 public enum Sensitivity: String, Codable, Sendable, CaseIterable { case exact, balanced, loose }
 
-/// The ways NameAlert can tell the user about a hit.
+/// The ways Takeheed can tell the user about a hit.
 public enum ChannelKind: String, Codable, Sendable, CaseIterable {
     case sound, notification, persistentAlarm, screenFlash, ntfy, telegramCall, webhook
 }

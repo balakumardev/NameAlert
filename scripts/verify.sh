@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# NameAlert's automated verification sweep (spec section 15). It runs every check that needs no person at the Mac,
+# Takeheed's automated verification sweep (spec section 15). It runs every check that needs no person at the Mac,
 # prints PASS, FAIL or SKIPPED with a one-line reason for each step, and writes build/verification-report.md.
 #
 #   scripts/verify.sh                        every step, in the order below

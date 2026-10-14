@@ -2,7 +2,7 @@ import Foundation
 import os
 import Security
 
-/// Where NameAlert keeps the few values that must never sit in `config.json`: the ntfy token, the webhook signing
+/// Where Takeheed keeps the few values that must never sit in `config.json`: the ntfy token, the webhook signing
 /// secret and the values of custom webhook headers.
 ///
 /// An empty string is the same as no secret. Setting `nil` or `""` deletes, and `secret(for:)` never returns `""`.
@@ -15,7 +15,7 @@ public protocol SecretStore: Sendable {
     func setSecret(_ value: String?, for account: String) throws
 }
 
-/// The account names NameAlert stores its secrets under. These strings are where the user's secrets live in the
+/// The account names Takeheed stores its secrets under. These strings are where the user's secrets live in the
 /// Keychain, so they must not change.
 public enum SecretAccount {
     public static let ntfyToken = "ntfy.token"

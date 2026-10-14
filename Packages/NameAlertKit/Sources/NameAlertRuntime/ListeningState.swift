@@ -60,6 +60,6 @@ public enum RuntimeWarning: Equatable, Sendable, Hashable {
     /// The local model cannot keep up with the audio on this Mac: the Light model would.
     case localModelFallingBehind
     /// Screen recording is allowed, but capture was refused: ScreenCaptureKit only sees the permission after
-    /// NameAlert relaunches.
+    /// Takeheed relaunches.
     case screenRecordingNeedsRelaunch
 }

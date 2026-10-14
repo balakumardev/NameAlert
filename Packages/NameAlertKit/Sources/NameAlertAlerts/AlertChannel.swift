@@ -27,7 +27,7 @@ public struct DeliveryFailure: Sendable, Equatable {
         self.date = date
     }
 
-    /// The words a failure gives for `error`: its `localizedDescription`. NameAlert's own errors (`AlertDeliveryError`,
+    /// The words a failure gives for `error`: its `localizedDescription`. Takeheed's own errors (`AlertDeliveryError`,
     /// `HTTPError`) say what went wrong in plain words through it. Any other error gets the sentence the system has for
     /// it rather than its internals: a network error's description lists the address that was called (a webhook
     /// address can hold a secret), a system error's its domain, code and user info.
@@ -36,7 +36,7 @@ public struct DeliveryFailure: Sendable, Equatable {
     }
 }
 
-/// Why a delivery failed, when NameAlert itself found the reason (as opposed to the network or the system).
+/// Why a delivery failed, when Takeheed itself found the reason (as opposed to the network or the system).
 public enum AlertDeliveryError: Error, Equatable, Sendable {
     /// The channel did not finish within the dispatcher's delivery timeout.
     case timedOut

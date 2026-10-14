@@ -2,7 +2,7 @@ import AppKit
 import NameAlertRuntime
 import SwiftUI
 
-/// The window that opens from the menu bar icon, 340 pt wide: what NameAlert is doing, the last words heard, the
+/// The window that opens from the menu bar icon, 340 pt wide: what Takeheed is doing, the last words heard, the
 /// recent mentions, and the everyday actions. It draws no background of its own: the menu bar window's material
 /// shows through.
 ///

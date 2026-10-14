@@ -1,6 +1,9 @@
 import Foundation
 
-/// Where NameAlert keeps its files. In the sandbox this resolves inside the app container.
+/// Where Takeheed keeps its files. In the sandbox this resolves inside the app container.
+///
+/// The folder keeps the app's first name, NameAlert, so that the configuration, the history and the downloaded
+/// models written before the rename are still found.
 ///
 /// These accessors only build URLs; the stores create the directories when they first write.
 public enum AppPaths {

@@ -2,7 +2,7 @@
 //
 // generate_icon.swift
 //
-// Renders the NameAlert app icon with Core Graphics only (no SF Symbols, no text, no network)
+// Renders the Takeheed app icon with Core Graphics only (no SF Symbols, no text, no network)
 // on the macOS Big Sur+ icon grid, then produces every size the asset catalog needs.
 //
 //   swift scripts/generate_icon.swift <outdir>
