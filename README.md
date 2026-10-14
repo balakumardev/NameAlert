@@ -1,8 +1,8 @@
-# NameAlert
+# Takeheed
 
-NameAlert is a macOS menu-bar app that alerts you the moment someone says your name or keyword during calls, meetings, or videos.
+Takeheed is a macOS menu-bar app that alerts you the moment someone says your name or keyword during calls, meetings, or videos.
 
-Speech transcription runs on your Mac, and your audio never leaves it. NameAlert is free, requires no account, and includes no analytics or advertisements.
+Speech transcription runs on your Mac, and your audio never leaves it. Takeheed is free, requires no account, and includes no analytics or advertisements.
 
 ## Features
 
@@ -29,7 +29,7 @@ Speech transcription runs on your Mac, and your audio never leaves it. NameAlert
 - macOS 14 Sonoma or later.
 - Apple silicon or Intel processor.
 - System permissions:
-  - **Screen & System Audio Recording**: Required to capture audio from calls and media via ScreenCaptureKit. NameAlert never captures or stores screen video.
+  - **Screen & System Audio Recording**: Required to capture audio from calls and media via ScreenCaptureKit. Takeheed never captures or stores screen video.
   - **Microphone**: Optional, for listening to people speaking in the room.
   - **Speech Recognition**: Required only on older macOS versions that rely on Apple's older speech recognizer.
   - **Notifications**: Optional, to display banner alerts.
@@ -71,6 +71,8 @@ swift test --package-path Packages/NameAlertKit
 ```
 
 ## Project Structure
+
+The folders, targets, modules and bundle ID keep the app's earlier name, NameAlert.
 
 - `NameAlert/`: App shell including menu bar items, onboarding flow, settings windows, and App Intents.
 - `Packages/NameAlertKit/`: Modular package containing core functionality:

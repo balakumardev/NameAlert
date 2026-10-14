@@ -1,14 +1,14 @@
-# NameAlert App Review Notes
+# Takeheed App Review Notes
 
 ## General Information
-NameAlert is a macOS menu-bar utility that alerts users when their name or chosen keywords are spoken during meetings, calls, or video playback.
-- Menu-bar app: NameAlert lives in the macOS menu bar (ear icon). There is no Dock icon and no main window after completing initial setup.
+Takeheed is a macOS menu-bar utility that alerts users when their name or chosen keywords are spoken during meetings, calls, or video playback.
+- Menu-bar app: Takeheed lives in the macOS menu bar (ear icon). There is no Dock icon and no main window after completing initial setup.
 - Initial setup: On first launch, a setup window appears to configure a name and optional permissions.
-- No account or login: NameAlert requires no account, sign-in, subscription, or in-app purchase.
+- No account or login: Takeheed requires no account, sign-in, subscription, or in-app purchase.
 - On-device processing: All speech transcription and keyword matching run on the Mac. Audio never leaves the Mac. The words around a mention leave only if the user sets up an ntfy, Telegram call or webhook alert, and only to the service they chose.
 
 ## Permissions Requested
-- Screen & System Audio Recording: Used only to receive system audio from calls and videos via Apple's ScreenCaptureKit framework. NameAlert never records, captures, or saves screen content. The video stream is configured to a 2x2 pixel buffer that is immediately discarded.
+- Screen & System Audio Recording: Used only to receive system audio from calls and videos via Apple's ScreenCaptureKit framework. Takeheed never records, captures, or saves screen content. The video stream is configured to a 2x2 pixel buffer that is immediately discarded.
 - Microphone: Optional. Used to listen to people speaking in the room.
 - Speech Recognition: Requested only on older macOS versions that rely on Apple's older on-device speech recognizer.
 - Notifications: Optional. Used to deliver local notifications when a keyword is matched.
