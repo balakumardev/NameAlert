@@ -70,7 +70,7 @@ private final class Harness {
         configuration: AppConfiguration = .test(), capabilities: EngineCapabilities = .analyzer,
         sleeper: TestSleeper = TestSleeper(), permissions: PermissionsSnapshot = .allGranted,
         capture: FakeCapture = FakeCapture(), speech: FakeSpeech = FakeSpeech(), models: FakeModels = FakeModels(),
-        channel: FakeChannel = FakeChannel(.sound), callDetectionSupported: Bool = true,
+        channel: FakeChannel = FakeChannel(.sound), otherChannels: [FakeChannel] = [], callDetectionSupported: Bool = true,
         captureCallLimit: Duration? = nil, proAccess: ProAccess = .pro
     ) throws {
         directory = FileManager.default.temporaryDirectory
@@ -97,7 +97,7 @@ private final class Harness {
             models: models,
             callStates: { calls.subscribe() },
             callDetectionSupported: callDetectionSupported,
-            channels: [channel],
+            channels: [channel] + otherChannels,
             systemLocaleIdentifier: { "en-US" },
             now: { clock.now },
             sleep: { try await sleeper.sleep($0) },
@@ -1053,6 +1053,29 @@ struct ListeningControllerProTests {
         #expect(await eventually { await h.controller.history().count == 1 })
         await settle()
         #expect(h.channel.hits.isEmpty, "ntfy is part of Pro")
+        await h.finish()
+    }
+
+    @Test func freeDeliversTheAlertsThatStayOnTheMacAndNotTheOthers() async throws {
+        var configuration = AppConfiguration.test(rules: [Rule(name: "My name", terms: ["Bala"], channels: [.sound, .ntfy])])
+        configuration.channels.ntfy.topic = "alerts"
+        let ntfy = FakeChannel(.ntfy)
+        let h = try Harness(
+            configuration: configuration, speech: heyBala(), channel: FakeChannel(.sound), otherChannels: [ntfy],
+            proAccess: .free)
+        #expect(await h.startListening())
+        #expect(await eventually { h.channel.hits.count == 1 })
+        await settle()
+        #expect(h.channel.hits.count == 1, "one delivery to Sound")
+        #expect(ntfy.hits.isEmpty, "none to ntfy, which is part of Pro")
+        await h.finish()
+    }
+
+    @Test func aTestOfAnAlertThatStaysOnTheMacWorksOnFree() async throws {
+        let h = try Harness(channel: FakeChannel(.sound), proAccess: .free)
+        await h.controller.bootstrap()
+        try await h.controller.testAlert(.sound)
+        #expect(h.channel.hits.count == 1)
         await h.finish()
     }
 
