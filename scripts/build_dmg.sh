@@ -38,7 +38,9 @@ TEAM_ID="KHD36T7C97"
 # The app's PRODUCT_NAME in project.yml: the bundle is $APP_NAME.app.
 APP_NAME="Takeheed"
 ENTITLEMENTS="NameAlert/NameAlert.entitlements"
-DERIVED_DATA="build/DerivedData"
+# The name ends in .noindex: Spotlight skips such folders, so it never finds the throwaway app built here and
+# registers it with LaunchServices again after unregister_apps took it out.
+DERIVED_DATA="build/DerivedData.noindex"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
 usage() {

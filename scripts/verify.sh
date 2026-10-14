@@ -32,7 +32,7 @@
 # network access the first time (the Balanced model, 60 MB, is downloaded into ~/Library/Caches/NameAlertTests), and
 # about 3 GB of free disk space. A run takes about 5 minutes on a Mac that has built the project before, and longer
 # on a clean checkout. Everything it makes goes under build/ and dist/, which git ignores: the release and dmg steps
-# delete build/DerivedData and build it again, and dmg replaces dist/Takeheed-<version>.dmg. It never stops or
+# delete build/DerivedData.noindex and build it again, and dmg replaces dist/Takeheed-<version>.dmg. It never stops or
 # restarts a running app, and it does not sign or send anything anywhere. The apps it builds are taken out of
 # LaunchServices again, so that macOS never opens one of them in place of the app in use.
 #
@@ -54,7 +54,9 @@ export PATH="/opt/homebrew/bin:$PATH"
 BUILD_DIR="build"
 LOG_DIR="$BUILD_DIR/verify"
 REPORT="$BUILD_DIR/verification-report.md"
-RELEASE_DERIVED_DATA="$BUILD_DIR/DerivedData"
+# The name ends in .noindex: Spotlight skips such folders, so it never finds the throwaway apps built here and
+# registers them with LaunchServices again after unregister_apps took them out.
+RELEASE_DERIVED_DATA="$BUILD_DIR/DerivedData.noindex"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
 STEP_IDS="unit integration performance rosetta release dmg screenshots warnings"
