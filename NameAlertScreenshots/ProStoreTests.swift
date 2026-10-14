@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import NameAlertCore
+import NameAlertRuntime
 import StoreKit
 import StoreKitTest
 import Testing
@@ -241,6 +242,22 @@ struct ProStoreTests {
         #expect(h.store.product == nil)
         #expect(h.store.productState == .idle)
         #expect(h.changes.isEmpty)
+    }
+
+    @Test("Buying and a refund reach the listening controller through startPurchases")
+    func purchasesReachTheController() async throws {
+        let h = try await StoreHarness()
+        defer { h.finish() }
+        let controller = DemoFixtures.controller(.off, proAccess: .free)
+        let environment = AppEnvironment(controller: controller, router: WindowRouter(), store: h.store)
+        environment.startPurchases()
+        #expect(await pollUntil(timeout: .seconds(15)) { h.store.status != .checking && h.store.productState == .loaded })
+        #expect(controller.proAccess == .free)
+        await h.buy()
+        #expect(await pollUntil(timeout: .seconds(10)) { controller.proAccess == .pro })
+        let transaction = try h.latestTransaction()
+        try h.session.refundTransaction(identifier: transaction.identifier)
+        #expect(await pollUntil(timeout: .seconds(10)) { controller.proAccess == .free })
     }
 
     @Test("A transaction StoreKit handed over counts before a read has it, and a refund is never undone")
