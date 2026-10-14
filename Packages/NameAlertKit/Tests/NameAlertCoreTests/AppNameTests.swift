@@ -10,11 +10,11 @@ struct AppNameTests {
         #expect(AppName.name(displayName: "  Name Pro \n") == "Name Pro")
     }
 
-    @Test func withoutADisplayNameItIsNameAlert() {
-        #expect(AppName.name(displayName: nil) == "NameAlert")
-        #expect(AppName.name(displayName: "") == "NameAlert")
-        #expect(AppName.name(displayName: " \n") == "NameAlert")
-        #expect(AppName.name(displayName: 42) == "NameAlert")
+    @Test func withoutADisplayNameItIsTakeheed() {
+        #expect(AppName.name(displayName: nil) == "Takeheed")
+        #expect(AppName.name(displayName: "") == "Takeheed")
+        #expect(AppName.name(displayName: " \n") == "Takeheed")
+        #expect(AppName.name(displayName: 42) == "Takeheed")
     }
 
     @Test func currentIsReadFromTheMainBundle() {

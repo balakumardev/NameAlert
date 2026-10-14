@@ -446,7 +446,7 @@ struct AlertDispatcherTests {
         #expect(DeliveryFailure.reason(for: error) == reason)
     }
 
-    @Test func nameAlertsOwnErrorsReadAsTheyDescribeThemselves() {
+    @Test func theAppsOwnErrorsReadAsTheyDescribeThemselves() {
         let errors: [any Error] = [
             AlertDeliveryError.notConfigured(.ntfy), AlertDeliveryError.rateLimited(.telegramCall),
             HTTPError.status(503), HTTPError.invalidResponse,

@@ -70,7 +70,7 @@ struct ConfigurationCodingTests {
         #expect(config.channels.ntfy.topic == "")
         #expect(config.channels.ntfy.priority == .high)
         #expect(config.channels.telegramCall.user == "")
-        #expect(config.channels.telegramCall.messageTemplate == "NameAlert heard {keyword}: {context}")
+        #expect(config.channels.telegramCall.messageTemplate == "Takeheed heard {keyword}: {context}")
         #expect(config.channels.telegramCall.voice == "en-US-Standard-B")
         #expect(config.channels.webhook.url == "")
         #expect(config.channels.webhook.headerNames.isEmpty)

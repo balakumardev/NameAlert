@@ -93,8 +93,8 @@ public actor HistoryStore {
                 // Only the count: an entry that failed to decode may hold anything that was heard.
                 logger.error("""
                     history.json has entries that could not be read, for example hits written by a newer version \
-                    of NameAlert. Skipped: \(decoded.skipped, privacy: .public). The others were kept; the next \
-                    write leaves the skipped ones out of the file.
+                    of \(AppName.current, privacy: .public). Skipped: \(decoded.skipped, privacy: .public). The \
+                    others were kept; the next write leaves the skipped ones out of the file.
                     """)
             }
             return Array(decoded.hits.prefix(capacity))

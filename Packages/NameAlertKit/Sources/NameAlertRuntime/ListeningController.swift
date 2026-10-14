@@ -1055,7 +1055,10 @@ public final class ListeningController {
             let kind: PermissionKind = source == .microphone ? .microphone : .screenRecording
             if kind == .screenRecording, permissions.screenRecording == .granted {
                 warnings.insert(.screenRecordingNeedsRelaunch)
-                logger.error("Screen recording is allowed, but capture was refused: NameAlert must relaunch")
+                logger.error("""
+                    Screen recording is allowed, but capture was refused: \
+                    \(AppName.current, privacy: .public) must relaunch
+                    """)
             }
             return .permanent(.permissionDenied(kind))
         case .noInputDevice:

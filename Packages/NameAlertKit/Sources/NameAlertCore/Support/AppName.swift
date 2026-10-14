@@ -4,11 +4,11 @@ import Foundation
 /// default Telegram message.
 ///
 /// It is the app's `CFBundleDisplayName`, so renaming the app is that one value in its Info.plist. A process without
-/// one, such as the test runner, gets "NameAlert".
+/// one, such as the test runner, gets "Takeheed".
 public enum AppName {
     public static let current = name(displayName: Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName"))
 
-    static let fallback = "NameAlert"
+    static let fallback = "Takeheed"
 
     /// `displayName` without the spaces around it, when it is text with something in it; `fallback` otherwise.
     static func name(displayName: Any?) -> String {

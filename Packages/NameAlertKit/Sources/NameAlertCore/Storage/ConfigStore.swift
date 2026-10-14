@@ -73,7 +73,7 @@ public actor ConfigStore {
                 // Kept like any unusable file, but not followed by a save: the newer version wrote this file and will
                 // want it back, and a save from this one would replace it with today's model.
                 keepFile(
-                    because: "was written by a newer version of NameAlert (schema \(version))",
+                    because: "was written by a newer version of \(AppName.current) (schema \(version))",
                     andStartFrom: "defaults")
                 return AppConfiguration()
             }

@@ -656,7 +656,7 @@ struct NetworkChannelsTests {
         #expect(components.queryItems?.map(\.name) == ["user", "text", "lang"])
         let query = queryItems(of: sent.request)
         #expect(query["lang"] == "en-GB-Standard-A")
-        #expect(query["text"] == "NameAlert heard Bala: …can Bala share the deck…")  // the default template
+        #expect(query["text"] == "Takeheed heard Bala: …can Bala share the deck…")  // the default template
         #expect(sent.request.timeoutInterval == 10)
     }
 

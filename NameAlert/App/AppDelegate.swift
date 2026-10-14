@@ -48,7 +48,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             guard let route = URLRoute(url: url) else {
-                logger.info("Ignored a link that is not a NameAlert command: \(url.absoluteString, privacy: .private)")
+                logger.info("""
+                    Ignored a link that is not a \(AppInfo.displayName, privacy: .public) command: \
+                    \(url.absoluteString, privacy: .private)
+                    """)
                 continue
             }
             environment.perform(route)

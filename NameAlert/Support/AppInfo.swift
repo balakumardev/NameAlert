@@ -1,13 +1,15 @@
 import Foundation
+import NameAlertCore
 
 /// The app's name, version and build, read from the bundle.
 ///
 /// This is the only place user-facing text gets the app's name from ("Quit \(AppInfo.displayName)"), so renaming the
 /// app means changing `CFBundleDisplayName` in the Info.plist and nothing in code.
 enum AppInfo {
-    /// The name people see: `CFBundleDisplayName`, else `CFBundleName`.
+    /// The name people see: `AppName.current`, the `CFBundleDisplayName` the package's text uses too, so both always
+    /// say the same name and only `AppName` holds a fallback.
     static var displayName: String {
-        value(for: "CFBundleDisplayName") ?? value(for: "CFBundleName") ?? "NameAlert"
+        AppName.current
     }
 
     /// The marketing version, e.g. "1.0.0".

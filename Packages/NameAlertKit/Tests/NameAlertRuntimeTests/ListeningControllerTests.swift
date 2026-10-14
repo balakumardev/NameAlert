@@ -895,7 +895,7 @@ struct ListeningControllerTests {
         #expect(hit.ruleName == "Test")
         #expect(hit.term == "Bala")
         #expect(hit.matchedText == "Bala")
-        #expect(hit.context == "This is a test alert from NameAlert.")
+        #expect(hit.context == "This is a test alert from Takeheed.")
         #expect(hit.timestamp == h.clock.now)
         #expect(hit.source == .systemAudio)
         #expect(hit.engine == .appleSFSpeech)
