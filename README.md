@@ -36,8 +36,7 @@ Speech transcription runs on your Mac, and your audio never leaves it. NameAlert
 
 ## Installation
 
-- Install from the [Mac App Store](#app-store).
-- Or download the notarized DMG from [GitHub Releases](https://github.com/balakumardev/NameAlert/releases/latest).
+Install it from the [Mac App Store](#app-store).
 
 ## Privacy
 
@@ -88,7 +87,7 @@ swift test --package-path Packages/NameAlertKit
 
 - `ci.yml`: Runs on every push and pull request. On GitHub's Xcode 27 preview image (`xcode-27`) it runs the package tests, builds a universal Release app with no warnings allowed in our sources, and runs the Screenshots scheme tests. The package tests also run on macOS 26 and macOS 15 (Xcode 26) and on an Intel Mac.
 - `appstore.yml`: Uploads builds to App Store Connect from `main`. On `v*` tags it also syncs the listing text, uploads the screenshots, sets the App Review details and submits for review.
-- `release.yml`: Runs the package tests, then builds, notarizes (the app, then the disk image) and publishes DMG releases on `v*` tags.
+- `release.yml`: Runs only by hand, since the app ships on the Mac App Store: on a `v*` tag it runs the package tests, then builds, notarizes (the app, then the disk image) and publishes a DMG release.
 - `pages.yml`: Deploys the static site to GitHub Pages.
 - Workflows that use secrets never run on pull requests, and install `xcodegen` and `asc` at pinned versions checked against a SHA-256.
 

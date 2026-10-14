@@ -2,8 +2,9 @@ name: Release
 
 # Builds the Developer ID DMG for a version tag, has Apple notarize it, and publishes it as a GitHub Release.
 #
-#   push of a v* tag   run the package tests, build, sign with Developer ID, notarize (up to 60 minutes each: the app,
-#                      then the DMG that holds it) and staple both, then create the release with the DMG and its SHA-256
+#   manual run on a v* tag   run the package tests, build, sign with Developer ID, notarize (up to 60 minutes each:
+#                            the app, then the DMG that holds it) and staple both, then create the release with the
+#                            DMG and its SHA-256. Start it from the Actions tab with the tag under "Use workflow from".
 #
 # It runs on GitHub's preview image with Xcode 27 (the label xcode-27), and uses the newest Xcode that is not a beta.
 # xcodegen is installed at the exact version below, from its GitHub release, and checked against the SHA-256 of the
@@ -17,8 +18,8 @@ name: Release
 # This workflow uses secrets, so it never runs on pull requests. A missing secret fails the run.
 
 on:
-  push:
-    tags: ['v*']
+  # By hand only: the app ships on the Mac App Store, so a tag push no longer publishes a public DMG.
+  workflow_dispatch:
 
 permissions:
   contents: write
