@@ -4,7 +4,8 @@ import NameAlertRuntime
 import SwiftUI
 
 /// Step 3: the permissions listening needs, a card each, and notifications as a recommended extra. The cards read the
-/// permissions again whenever the app comes forward (after the user turned one on in System Settings).
+/// permissions again whenever the app comes forward, and every second while one that is needed is off: turning it on
+/// in System Settings does not bring the app forward, so setup comes forward by itself when it sees the change.
 struct PermissionsStep: View {
     @Bindable var model: OnboardingModel
     /// Goes on although something that is needed is not allowed yet.
@@ -16,6 +17,9 @@ struct PermissionsStep: View {
     var otherCopies: OtherCopies = .shared
 
     @Environment(ListeningController.self) private var controller
+
+    /// The setup window, to bring forward.
+    @State private var window = WindowHandle()
 
     /// The most height the cards take before they scroll: what the step has left under its title.
     static let cardsHeight: CGFloat = 252
@@ -47,10 +51,12 @@ struct PermissionsStep: View {
                 }
             }
         }
+        .background(WindowReader(handle: window))
         .task {
             await controller.refreshPermissions()
             _ = await controller.resolvedEngine()  // the engine decides whether Speech Recognition is needed too
         }
+        .task { await watchForSwitches() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await controller.refreshPermissions() }
         }
@@ -88,6 +94,24 @@ struct PermissionsStep: View {
     private func relaunch() {
         OnboardingResume.mark()
         AppRelaunch.relaunch()
+    }
+
+    /// While the step shows and a permission listening needs is off, reads the permissions every second, and brings
+    /// setup forward when one of them turns on.
+    private func watchForSwitches() async {
+        guard AppEnvironment.isLive else { return }
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(1))
+            let required = controller.requiredPermissions()
+            let before = controller.permissions
+            guard !Self.allAllowed(required, in: before) else { continue }
+            await controller.refreshPermissions()
+            if Foreground.becameAllowed(required, before: before, after: controller.permissions),
+                let window = window.window
+            {
+                Foreground.bring(window)
+            }
+        }
     }
 
     // MARK: Rules

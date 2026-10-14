@@ -59,7 +59,13 @@ private struct OnboardingFlow: View {
         }
         .frame(width: OnboardingView.size.width, height: OnboardingView.size.height)
         .background(Color(nsColor: .windowBackgroundColor))
-        .background(WindowCentering())
+        .background(
+            WindowReader { window in
+                // In the middle of the screen, and in front: a menu bar app's window opens behind the app in front,
+                // as it did when macOS opened the app again after Screen Recording was allowed.
+                window.center()
+                Foreground.bring(window)
+            })
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: model.step)
         .onAppear { OnboardingResume.clear() }
         .onDisappear(perform: closed)
@@ -199,28 +205,5 @@ struct OnboardingStepLayout<Content: View>: View {
         .padding(.top, 28)
         .padding(.bottom, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-    }
-}
-
-/// Puts the window in the middle of the screen when it opens. It waits a moment, so that the window has the size of
-/// its content by then and the middle is the middle of that.
-private struct WindowCentering: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        CenteringView()
-    }
-
-    func updateNSView(_ view: NSView, context: Context) {}
-
-    private final class CenteringView: NSView {
-        private var hasCentered = false
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            guard !hasCentered, let window else { return }
-            hasCentered = true
-            Task { @MainActor [weak window] in
-                window?.center()
-            }
-        }
     }
 }

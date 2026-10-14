@@ -735,6 +735,37 @@ struct OnboardingLogicTests {
         #expect(OtherCopies().urls.isEmpty)
     }
 
+    // MARK: Coming forward
+
+    @Test("Setup comes forward when a permission it needs is turned on, and not for anything else")
+    func comesForwardWhenAllowed() {
+        let off = PermissionsSnapshot(
+            microphone: .notDetermined, screenRecording: .notDetermined, speechRecognition: .denied,
+            notifications: .notDetermined)
+        var micOn = off
+        micOn.microphone = .granted
+        var screenOn = off
+        screenOn.screenRecording = .granted
+        #expect(Foreground.becameAllowed([.microphone, .screenRecording], before: off, after: micOn))
+        #expect(Foreground.becameAllowed([.screenRecording], before: off, after: screenOn))
+        // Nothing changed; a permission setup does not need; a refusal; one that was allowed already.
+        #expect(!Foreground.becameAllowed([.microphone, .screenRecording], before: off, after: off))
+        #expect(!Foreground.becameAllowed([.screenRecording], before: off, after: micOn))
+        var micRefused = off
+        micRefused.microphone = .denied
+        #expect(!Foreground.becameAllowed([.microphone], before: off, after: micRefused))
+        #expect(!Foreground.becameAllowed([.microphone], before: micOn, after: micOn))
+        #expect(!Foreground.becameAllowed([], before: off, after: allowed))
+    }
+
+    @Test("The window that asked comes forward once the prompt is answered; Screen Recording's request does not wait")
+    func comesForwardAfterAsking() {
+        #expect(Foreground.raisesAfterAsking(for: .microphone))
+        #expect(Foreground.raisesAfterAsking(for: .speechRecognition))
+        #expect(Foreground.raisesAfterAsking(for: .notifications))
+        #expect(!Foreground.raisesAfterAsking(for: .screenRecording))
+    }
+
     // MARK: The engine and the test
 
     @Test("The engine step says what the brief says, and when it can start")

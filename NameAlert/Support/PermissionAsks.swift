@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import NameAlertCore
 import NameAlertRuntime
 import Observation
@@ -38,11 +38,16 @@ final class PermissionAsks {
 
 extension ListeningController {
     /// Asks the system for a permission (it shows its own prompt when the user has not decided yet), then remembers that
-    /// it was asked, so that the next fix points to System Settings. Returns whether the permission is granted.
+    /// it was asked, so that the next fix points to System Settings. Answering the prompt leaves another app in front,
+    /// so the window that asked comes forward again. Returns whether the permission is granted.
     @discardableResult
     func ask(for kind: PermissionKind, asks: PermissionAsks = .shared) async -> Bool {
+        let window = NSApp.keyWindow
         let granted = await requestPermission(kind)
         asks.markAsked(kind)
+        if Foreground.raisesAfterAsking(for: kind), let window, window.isVisible {
+            Foreground.bring(window)
+        }
         return granted
     }
 }
