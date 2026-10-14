@@ -127,6 +127,12 @@ public struct RuleEngine: Sendable {
         }
         return hints
     }
+
+    /// Whether `rule` can ever alert: it is turned on and has a word with a letter or a digit. A rule that cannot alert
+    /// does not count against the rules Free alerts with (`ProPolicy`).
+    public static func canFire(_ rule: Rule) -> Bool {
+        CompiledRule(rule).isActive
+    }
 }
 
 // MARK: - Limits
