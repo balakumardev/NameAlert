@@ -1,4 +1,5 @@
 import AppKit
+import NameAlertCore
 import NameAlertRuntime
 import SwiftUI
 
@@ -34,6 +35,8 @@ struct StatusIcon: View {
 
     private func openPendingWindow() {
         guard let destination = router.takePending() else { return }
+        Log.logger("app").info(
+            "Opening \(String(describing: destination), privacy: .public); active: \(NSApp.isActive, privacy: .public)")
         // A menu bar app is not in front: without this its windows open behind the app the user is in.
         NSApp.activate(ignoringOtherApps: true)
         if let id = destination.windowID {

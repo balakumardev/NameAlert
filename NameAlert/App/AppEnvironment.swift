@@ -57,8 +57,14 @@ final class AppEnvironment {
                 """)
         }
         Task {
+            let start = ContinuousClock.now
             await ensureStartedUp()
-            if !controller.configuration.hasCompletedOnboarding {
+            let isDone = controller.configuration.hasCompletedOnboarding
+            logger.info("""
+                Started up in \(start.duration(to: .now), privacy: .public); \
+                setup is \(isDone ? "done" : "not done", privacy: .public)
+                """)
+            if !isDone {
                 router.open(.onboarding)
             }
         }
