@@ -241,3 +241,10 @@ jobs:
             exit 1
           fi
           echo "All $count Mach-O files in the app include arm64 and x86_64."
+
+      - name: Check that the Release build sells nothing
+        if: steps.xcode.outputs.skip != 'true' && matrix.full
+        run: |
+          # Only the Mac App Store archive is built with APP_STORE_BUILD (scripts/build_appstore.sh). This build must have
+          # everything on and no purchase.
+          bash scripts/check_purchase_mode.sh build/DerivedData/Build/Products/Release/Takeheed.app --does-not-sell

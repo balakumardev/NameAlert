@@ -83,4 +83,16 @@ struct ProLogicTests {
     func terms() {
         #expect(AboutLinks.terms.absoluteString == "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")
     }
+
+    @Test("The marker the build scripts look for is the one only the App Store build has")
+    func markerMatchesTheScript() throws {
+        let root = RenderHarness.repositoryRoot
+        let source = try String(contentsOf: root.appendingPathComponent("NameAlert/Store/StoreBuild.swift"), encoding: .utf8)
+        let script = try String(contentsOf: root.appendingPathComponent("scripts/check_purchase_mode.sh"), encoding: .utf8)
+        let marker = "app-store-build:pro-purchases-enforced"
+        #expect(source.contains("static let marker = \"\(marker)\""))
+        #expect(script.contains("MARKER=\"\(marker)\""))
+        #expect(marker.utf8.count > 15, "Swift keeps a string of 15 bytes or fewer inside the machine code, where grep cannot find it")
+        #expect(!StoreBuild.isEnforced, "a test run sells nothing")
+    }
 }

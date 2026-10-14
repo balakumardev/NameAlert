@@ -8,11 +8,12 @@
 # What it does:
 #   1. Checks everything it needs (tools, the profile, the two signing identities) before it builds anything,
 #      and reports every problem it finds together.
-#   2. Archives a universal (arm64 + x86_64) Release build, signed with the Apple Distribution identity.
+#   2. Archives a universal (arm64 + x86_64) Release build with APP_STORE_BUILD, the switch that makes the app sell Pro,
+#      signed with the Apple Distribution identity.
 #      One entitlements file is used (NameAlert/NameAlert.entitlements): the sandbox, audio input and network
 #      client, and nothing else.
-#   3. Checks the archived app: exactly those entitlements, the right team, the build number, and a slice for
-#      both architectures in every Mach-O file.
+#   3. Checks the archived app: exactly those entitlements, the right team, the build number, a slice for both
+#      architectures in every Mach-O file, and that it sells Pro (scripts/check_purchase_mode.sh).
 #   4. Writes build/ExportOptions.plist (app-store-connect, manual signing) and exports. -exportArchive embeds
 #      the provisioning profile, re-signs the app and signs the package with the installer identity.
 #
@@ -327,6 +328,8 @@ ARCHIVE_ARGS=(
     DEVELOPMENT_TEAM="$TEAM_ID"
     CODE_SIGN_STYLE=Manual
     CODE_SIGN_IDENTITY="$MAS_IDENTITY"
+    # The App Store build is the one build that sells Pro (NameAlert/Store/StoreBuild.swift).
+    'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) APP_STORE_BUILD'
 )
 if [[ -n "${APPLE_BUILD_KEYCHAIN:-}" ]]; then
     # Sign from that keychain only, not from another one that holds a copy of the identity.
@@ -396,6 +399,9 @@ check_universal() {
     echo "All $count Mach-O files in the app include arm64 and x86_64."
 }
 check_universal "$APP"
+
+# The archive must sell Pro: without the flag, everything would be free in the store.
+bash scripts/check_purchase_mode.sh "$APP" --sells
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Export

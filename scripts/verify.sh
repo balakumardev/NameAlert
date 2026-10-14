@@ -458,6 +458,10 @@ step_release() {
     detail "- \`lipo -archs\` on the app: \`$app_archs\`; on whisper.framework: \`$whisper_archs\`."
     detail "- Every Mach-O file in the app:"
     check_universal "$app"
+    if ! scripts/check_purchase_mode.sh "$app" --does-not-sell > "$LOG_DIR/release-purchase-mode.log" 2>&1; then
+        fail "the Release build sells Pro: $(tail -1 "$LOG_DIR/release-purchase-mode.log")"
+        return
+    fi
 
     case " $app_archs " in *" arm64 "*) ;; *) fail "the app has no arm64 slice (it has: $app_archs)"; return ;; esac
     case " $app_archs " in *" x86_64 "*) ;; *) fail "the app has no x86_64 slice (it has: $app_archs)"; return ;; esac

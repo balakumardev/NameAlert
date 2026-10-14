@@ -10,6 +10,7 @@
 # What it does:
 #   1. Checks everything it needs (tools, the signing identity, the notary key) before it builds anything.
 #   2. Builds a universal (arm64 + x86_64) Release app and checks that every Mach-O in it has both slices.
+#      It also checks that the app does not sell Pro: only the Mac App Store build does (scripts/check_purchase_mode.sh).
 #   3. Signs the nested code and then the app with the hardened runtime and a secure timestamp, using the
 #      app's one entitlements file (NameAlert/NameAlert.entitlements). No --deep: each piece is signed itself.
 #   4. Notarizes the app by itself first: a zip of it goes to Apple's notary service (waits up to 60 minutes), and the
@@ -314,6 +315,9 @@ check_universal() {
     echo "All $count Mach-O files in the app include arm64 and x86_64."
 }
 check_universal "$APP"
+
+# Only the Mac App Store build sells Pro; this one has everything on.
+bash scripts/check_purchase_mode.sh "$APP" --does-not-sell
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Sign the app

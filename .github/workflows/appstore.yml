@@ -598,9 +598,29 @@ jobs:
           asc validate --app "$ASC_APP_ID" --version-id "$VERSION_ID" --platform MAC_OS --pretty \
             || echo "::warning::asc validate reported problems. See the report above."
 
+      - name: Check that the Pro purchase can go to review from here
+        id: iap
+        if: steps.plan.outputs.submit == 'true'
+        env:
+          PRO_PRODUCT_ID: dev.balakumar.namealert.pro
+        run: |
+          # Apple takes a new in-app purchase for review only together with a version, submitted on the App Store Connect
+          # website. Until Pro has been approved once, this run stops before submitting: on the website, press Add for
+          # Review on the version page and on the purchase's page, then Submit for Review there.
+          json="$(asc iap list --app "$ASC_APP_ID" --paginate --output json)"
+          state="$(jq -r --arg id "$PRO_PRODUCT_ID" \
+            '[.data[] | select(.attributes.productId == $id) | .attributes.state][0] // "MISSING"' <<<"$json")"
+          echo "The Pro in-app purchase is $state."
+          if [[ "$state" == "APPROVED" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::$PRO_PRODUCT_ID is $state, not APPROVED, so this version was not submitted. Submit it together with the purchase on the App Store Connect website."
+          fi
+
       - name: Submit for review
         id: submit
-        if: steps.plan.outputs.submit == 'true'
+        if: steps.plan.outputs.submit == 'true' && steps.iap.outputs.ready == 'true'
         env:
           VERSION_ID: ${{ steps.version.outputs.version_id }}
           BUILD_ID: ${{ steps.build.outputs.build_id }}
@@ -617,6 +637,7 @@ jobs:
           EXISTS: ${{ steps.existing.outputs.exists }}
           UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
           SUBMIT_OUTCOME: ${{ steps.submit.outcome }}
+          IAP_READY: ${{ steps.iap.outputs.ready }}
         run: |
           {
             echo "### Takeheed $VERSION (build $BUILD_NUMBER)"
@@ -625,7 +646,9 @@ jobs:
             else
               echo "- Upload to App Store Connect: $UPLOAD_OUTCOME."
             fi
-            if [[ "$SUBMIT" == "true" ]]; then
+            if [[ "$SUBMIT" == "true" && "$IAP_READY" == "false" ]]; then
+              echo "- Not submitted: the Pro in-app purchase is not approved yet. Submit this version with it on the App Store Connect website."
+            elif [[ "$SUBMIT" == "true" ]]; then
               echo "- Submit for review: $SUBMIT_OUTCOME."
             else
               echo "- Not submitted for review. Tag the commit as v$VERSION, or run this workflow with submit ticked."
