@@ -131,12 +131,18 @@ plist_keys() {
 # place of the app in use: after a Screen Recording "Quit & Reopen" it opened an unsigned build from build/, which had
 # neither the permissions nor the settings. This takes every app under the folder $1 out of LaunchServices again; the
 # files stay.
+# xcodebuild registers the app, and about a third of a second later siriknowledged registers it again as a
+# launch-disabled copy, which is after the first pass when that one comes straight after the build. So this takes the
+# apps out a second time, a few seconds later.
 unregister_apps() {
-    local app
+    local app pass
     [[ -d "$1" ]] || return 0
-    while IFS= read -r -d '' app; do
-        "$LSREGISTER" -u "$app" >/dev/null 2>&1 || true
-    done < <(find "$1" -type d -name '*.app' -prune -print0)
+    for pass in 1 2; do
+        while IFS= read -r -d '' app; do
+            "$LSREGISTER" -u "$app" >/dev/null 2>&1 || true
+        done < <(find "$1" -type d -name '*.app' -prune -print0)
+        [[ $pass -eq 2 ]] || sleep 3
+    done
 }
 
 # Sends the file $1 (the app in a zip, or the disk image) to Apple's notary service and waits for the verdict. $2 says
