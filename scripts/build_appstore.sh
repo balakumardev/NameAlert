@@ -30,7 +30,9 @@
 #                            Connect rejects an upload that was built with a beta. A beta shows in the developer
 #                            directory (DEVELOPER_DIR, else what xcode-select names) or in `xcodebuild -version`.
 #
-# The script never stops or restarts a running app. Everything it builds goes under build/ and dist/appstore/.
+# The script never stops or restarts a running app. Everything it builds goes under build/ and dist/appstore/, and the
+# app the archive builds is taken out of LaunchServices again, so that macOS never opens that copy in place of the app
+# in use.
 
 set -euo pipefail
 
@@ -42,6 +44,7 @@ DERIVED_DATA="build/DerivedData-appstore"
 ARCHIVE_PATH="build/$APP_NAME.xcarchive"
 EXPORT_OPTIONS="build/ExportOptions.plist"
 EXPORT_DIR="dist/appstore"
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
 usage() {
     cat <<'EOF'
@@ -120,6 +123,18 @@ identity_exists() {
 # The top-level keys of the property list $1, one per line.
 plist_keys() {
     /usr/libexec/PlistBuddy -c 'Print' "$1" | awk '/^    [^ ]/ { print $1 }'
+}
+
+# xcodebuild registers every app it builds with LaunchServices (an archive, the copy it builds in the derived data), and
+# macOS may then open such a copy by its bundle id in place of the app in use: after a Screen Recording "Quit & Reopen"
+# it opened an unsigned build from build/, which had neither the permissions nor the settings. This takes every app
+# under the folder $1 out of LaunchServices again; the files stay.
+unregister_apps() {
+    local app
+    [[ -d "$1" ]] || return 0
+    while IFS= read -r -d '' app; do
+        "$LSREGISTER" -u "$app" >/dev/null 2>&1 || true
+    done < <(find "$1" -type d -name '*.app' -prune -print0)
 }
 
 # Succeeds when the provisioning profile (decoded to the property list $1) lists the certificate with SHA-1 $2.
@@ -316,7 +331,10 @@ if [[ -n "${APPLE_BUILD_KEYCHAIN:-}" ]]; then
     # Sign from that keychain only, not from another one that holds a copy of the identity.
     ARCHIVE_ARGS+=("OTHER_CODE_SIGN_FLAGS=--keychain $APPLE_BUILD_KEYCHAIN")
 fi
-xcodebuild "${ARCHIVE_ARGS[@]}"
+archive_status=0
+xcodebuild "${ARCHIVE_ARGS[@]}" || archive_status=$?
+unregister_apps "$DERIVED_DATA"
+[[ $archive_status -eq 0 ]] || exit "$archive_status"
 
 APP="$ARCHIVE_PATH/Products/Applications/$APP_NAME.app"
 [[ -d "$APP" ]] || die "The archive has no app at $APP."

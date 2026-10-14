@@ -28,7 +28,8 @@
 #                         App Store Connect API key for notarytool: the key id, the issuer id and the path of the
 #                         .p8 file. Needed unless notarization is skipped.
 #
-# The script never stops or restarts a running app. Everything it builds goes under build/ and dist/.
+# The script never stops or restarts a running app. Everything it builds goes under build/ and dist/, and the app it
+# builds is taken out of LaunchServices again, so that macOS never opens that copy in place of the app in use.
 
 set -euo pipefail
 
@@ -36,6 +37,7 @@ TEAM_ID="KHD36T7C97"
 APP_NAME="NameAlert"
 ENTITLEMENTS="NameAlert/NameAlert.entitlements"
 DERIVED_DATA="build/DerivedData"
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
 usage() {
     cat <<'EOF'
@@ -119,6 +121,18 @@ identity_exists() {
 # The top-level keys of the property list $1, one per line.
 plist_keys() {
     /usr/libexec/PlistBuddy -c 'Print' "$1" | awk '/^    [^ ]/ { print $1 }'
+}
+
+# xcodebuild registers every app it builds with LaunchServices, and macOS may then open such a copy by its bundle id in
+# place of the app in use: after a Screen Recording "Quit & Reopen" it opened an unsigned build from build/, which had
+# neither the permissions nor the settings. This takes every app under the folder $1 out of LaunchServices again; the
+# files stay.
+unregister_apps() {
+    local app
+    [[ -d "$1" ]] || return 0
+    while IFS= read -r -d '' app; do
+        "$LSREGISTER" -u "$app" >/dev/null 2>&1 || true
+    done < <(find "$1" -type d -name '*.app' -prune -print0)
 }
 
 # Sends the file $1 (the app in a zip, or the disk image) to Apple's notary service and waits for the verdict. $2 says
@@ -252,6 +266,7 @@ xcodegen generate --quiet
 log "Building a universal Release app (arm64 and x86_64)"
 # Xcode does not sign anything here: the signing below is done piece by piece, with the explicit identity.
 rm -rf "$DERIVED_DATA"
+build_status=0
 xcodebuild build \
     -project NameAlert.xcodeproj \
     -scheme NameAlert \
@@ -260,7 +275,9 @@ xcodebuild build \
     -derivedDataPath "$DERIVED_DATA" \
     ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
     CURRENT_PROJECT_VERSION="$BUILD" \
-    CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+    CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" || build_status=$?
+unregister_apps "$DERIVED_DATA"
+[[ $build_status -eq 0 ]] || exit "$build_status"
 
 APP="$DERIVED_DATA/Build/Products/Release/$APP_NAME.app"
 [[ -d "$APP" ]] || die "The build did not produce $APP."

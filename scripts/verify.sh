@@ -33,7 +33,8 @@
 # about 3 GB of free disk space. A run takes about 5 minutes on a Mac that has built the project before, and longer
 # on a clean checkout. Everything it makes goes under build/ and dist/, which git ignores: the release and dmg steps
 # delete build/DerivedData and build it again, and dmg replaces dist/NameAlert-<version>.dmg. It never stops or
-# restarts a running app, and it does not sign or send anything anywhere.
+# restarts a running app, and it does not sign or send anything anywhere. The apps it builds are taken out of
+# LaunchServices again, so that macOS never opens one of them in place of the app in use.
 #
 # Written for bash 3.2, the one macOS ships.
 
@@ -54,6 +55,7 @@ BUILD_DIR="build"
 LOG_DIR="$BUILD_DIR/verify"
 REPORT="$BUILD_DIR/verification-report.md"
 RELEASE_DERIVED_DATA="$BUILD_DIR/DerivedData"
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
 STEP_IDS="unit integration performance rosetta release dmg screenshots warnings"
 
@@ -211,6 +213,18 @@ run_logged() {
     RUN_LOGS="$RUN_LOGS $log"
     printf '$ %s\n\n' "$*" > "$log"
     "$@" >> "$log" 2>&1
+}
+
+# xcodebuild registers every app it builds with LaunchServices, and macOS may then open such a copy by its bundle id in
+# place of the app in use: after a Screen Recording "Quit & Reopen" it opened the unsigned Release build from here, which
+# had neither the permissions nor the settings. This takes every app under the folder $1 out of LaunchServices again;
+# the files stay.
+unregister_apps() {
+    local app
+    [[ -d "$1" ]] || return 0
+    while IFS= read -r -d '' app; do
+        "$LSREGISTER" -u "$app" > /dev/null 2>&1 || true
+    done < <(find "$1" -type d -name '*.app' -prune -print0)
 }
 
 # One line on why a log's command failed: the first failed test or compiler error in it, else the first error, else its
@@ -422,6 +436,7 @@ step_release() {
         -derivedDataPath "$RELEASE_DERIVED_DATA" \
         ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO \
         CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" || status=$?
+    unregister_apps "$RELEASE_DERIVED_DATA"
     detail "- Command: the same \`xcodebuild build\` as \`ci.yml\` (Release, \`generic/platform=macOS\`, \`ARCHS=\"arm64 x86_64\"\`, signing off), from a clean \`$RELEASE_DERIVED_DATA\` (log: \`$log\`)"
     if [[ $status -ne 0 ]]; then
         fail "xcodebuild exited with $status: $(why_failed "$log")"
