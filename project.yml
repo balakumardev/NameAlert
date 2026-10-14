@@ -74,6 +74,11 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.balakumar.namealert
+        # The bundle is Takeheed.app, its executable Takeheed. The Swift module keeps the name NameAlert, so the App
+        # Intents and anything else recorded under the module's name stay as they are. Only on this target: the
+        # screenshot host, its tests (TEST_HOST, @testable import ScreenshotHost) and the package keep their names.
+        PRODUCT_NAME: Takeheed
+        PRODUCT_MODULE_NAME: NameAlert
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: NameAlert/Info.plist
         CODE_SIGN_ENTITLEMENTS: NameAlert/NameAlert.entitlements

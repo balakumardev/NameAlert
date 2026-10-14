@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Builds NameAlert's Developer ID disk image, dist/NameAlert-<version>.dmg.
+# Builds Takeheed's Developer ID disk image, dist/Takeheed-<version>.dmg.
 #
 #   scripts/build_dmg.sh                 build, sign, notarize and staple
 #   scripts/build_dmg.sh --no-notarize   build and sign, but do not send the app or the image to Apple's notary service
@@ -17,7 +17,7 @@
 #   5. Packs the stapled app and an Applications shortcut into a compressed disk image, and signs the image.
 #   6. Sends the image to Apple's notary service (waits up to 60 minutes), staples the ticket to it and has
 #      Gatekeeper assess it.
-#   7. Writes dist/NameAlert-<version>.dmg.sha256 (shasum -a 256, run inside dist/, so `shasum -c` works there).
+#   7. Writes dist/Takeheed-<version>.dmg.sha256 (shasum -a 256, run inside dist/, so `shasum -c` works there).
 #
 # Environment (names only; values are never printed):
 #   BUILD_NUMBER          CFBundleVersion of the app. Default: git rev-list --count HEAD.
@@ -34,7 +34,8 @@
 set -euo pipefail
 
 TEAM_ID="KHD36T7C97"
-APP_NAME="NameAlert"
+# The app's PRODUCT_NAME in project.yml: the bundle is $APP_NAME.app.
+APP_NAME="Takeheed"
 ENTITLEMENTS="NameAlert/NameAlert.entitlements"
 DERIVED_DATA="build/DerivedData"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"

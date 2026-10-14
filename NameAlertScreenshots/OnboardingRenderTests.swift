@@ -116,7 +116,7 @@ struct OnboardingRenderTests {
             permissions: PermissionsSnapshot(
                 microphone: .granted, screenRecording: .notDetermined, speechRecognition: .granted,
                 notifications: .granted))
-        let copies = OtherCopies(urls: [URL(fileURLWithPath: "/Users/someone/Downloads/NameAlert.app", isDirectory: true)])
+        let copies = OtherCopies(urls: [URL(fileURLWithPath: "/Users/someone/Downloads/Takeheed.app", isDirectory: true)])
         let view = SettingsRenderFrame {
             PermissionsStep(model: model(.permissions), continueAnyway: {}, otherCopies: copies)
                 .environment(controller)
@@ -726,25 +726,25 @@ struct OnboardingLogicTests {
 
     @Test("Another registered copy is found by its path, however it is spelled; the running copy and gone ones are not")
     func otherCopies() throws {
-        let running = URL(fileURLWithPath: "/Applications/NameAlert.app", isDirectory: true)
-        let other = URL(fileURLWithPath: "/Users/someone/Downloads/NameAlert.app", isDirectory: true)
+        let running = URL(fileURLWithPath: "/Applications/Takeheed.app", isDirectory: true)
+        let other = URL(fileURLWithPath: "/Users/someone/Downloads/Takeheed.app", isDirectory: true)
         let there: (URL) -> Bool = { _ in true }
         #expect(OtherCopies.others(of: running, among: [], exists: there) == [])
         #expect(OtherCopies.others(of: running, among: [running], exists: there) == [])
         #expect(OtherCopies.others(of: running, among: [other, running], exists: there) == [other])
         // The running copy spelled another way, and the other copy twice.
-        let respelled = URL(fileURLWithPath: "/Applications/Utilities/../NameAlert.app/", isDirectory: true)
+        let respelled = URL(fileURLWithPath: "/Applications/Utilities/../Takeheed.app/", isDirectory: true)
         #expect(OtherCopies.others(of: running, among: [respelled, other, other], exists: there) == [other])
         // LaunchServices can still list a copy that was deleted, or one on a disk image that was ejected.
-        let ejected = URL(fileURLWithPath: "/Volumes/NameAlert/NameAlert.app", isDirectory: true)
+        let ejected = URL(fileURLWithPath: "/Volumes/Takeheed/Takeheed.app", isDirectory: true)
         #expect(OtherCopies.others(of: running, among: [ejected, other], exists: { $0 != ejected }) == [other])
 
         // On disk: a symbolic link to the running copy is the running copy, and a copy that is not there is left out.
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("other-copies-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: folder) }
-        let app = folder.appendingPathComponent("NameAlert.app", isDirectory: true)
-        let elsewhere = folder.appendingPathComponent("Elsewhere/NameAlert.app", isDirectory: true)
-        let gone = folder.appendingPathComponent("Gone/NameAlert.app", isDirectory: true)
+        let app = folder.appendingPathComponent("Takeheed.app", isDirectory: true)
+        let elsewhere = folder.appendingPathComponent("Elsewhere/Takeheed.app", isDirectory: true)
+        let gone = folder.appendingPathComponent("Gone/Takeheed.app", isDirectory: true)
         try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
         let link = folder.appendingPathComponent("Link.app", isDirectory: true)
@@ -754,17 +754,17 @@ struct OnboardingLogicTests {
 
         // A copy Gatekeeper runs from a random folder cannot tell which registered copy it is.
         let translocated = URL(
-            fileURLWithPath: "/private/var/folders/ab/xyz/T/AppTranslocation/0A1B/d/NameAlert.app", isDirectory: true)
+            fileURLWithPath: "/private/var/folders/ab/xyz/T/AppTranslocation/0A1B/d/Takeheed.app", isDirectory: true)
         #expect(OtherCopies.others(of: translocated, among: [other], exists: there) == [])
     }
 
     @Test("The note says where the other copy is and what to do, on the Screen Recording card until it is allowed")
     func otherCopyNote() {
-        let other = URL(fileURLWithPath: "/Users/someone/Downloads/NameAlert.app", isDirectory: true)
-        let second = URL(fileURLWithPath: "/Applications/NameAlert.app", isDirectory: true)
+        let other = URL(fileURLWithPath: "/Users/someone/Downloads/Takeheed.app", isDirectory: true)
+        let second = URL(fileURLWithPath: "/Applications/Takeheed.app", isDirectory: true)
         #expect(OtherCopies.note(for: []) == nil)
         #expect(OtherCopies.note(for: [other, second]) == """
-            Another copy of \(AppInfo.displayName) is at /Users/someone/Downloads/NameAlert.app. After you allow Screen \
+            Another copy of \(AppInfo.displayName) is at /Users/someone/Downloads/Takeheed.app. After you allow Screen \
             Recording, macOS may open that copy instead. Delete it, then open this one.
             """)
 

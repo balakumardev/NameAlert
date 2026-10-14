@@ -447,7 +447,7 @@ struct PopoverLogicTests {
 
     @Test("Another copy of the app is mentioned with a Screen Recording problem, and only then")
     func otherCopyNote() {
-        let copies = [URL(fileURLWithPath: "/Users/someone/Downloads/NameAlert.app", isDirectory: true)]
+        let copies = [URL(fileURLWithPath: "/Users/someone/Downloads/Takeheed.app", isDirectory: true)]
         let note = OtherCopies.note(for: copies)
         #expect(note != nil)
         #expect(PopoverNotices.otherCopyNote(issue: .permissionDenied(.screenRecording), warnings: [], copies: copies)

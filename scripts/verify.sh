@@ -32,7 +32,7 @@
 # network access the first time (the Balanced model, 60 MB, is downloaded into ~/Library/Caches/NameAlertTests), and
 # about 3 GB of free disk space. A run takes about 5 minutes on a Mac that has built the project before, and longer
 # on a clean checkout. Everything it makes goes under build/ and dist/, which git ignores: the release and dmg steps
-# delete build/DerivedData and build it again, and dmg replaces dist/NameAlert-<version>.dmg. It never stops or
+# delete build/DerivedData and build it again, and dmg replaces dist/Takeheed-<version>.dmg. It never stops or
 # restarts a running app, and it does not sign or send anything anywhere. The apps it builds are taken out of
 # LaunchServices again, so that macOS never opens one of them in place of the app in use.
 #
@@ -445,12 +445,12 @@ step_release() {
     # Only a build that succeeded gives the warnings gate something to read.
     RELEASE_LOG="$log"
 
-    local app="$RELEASE_DERIVED_DATA/Build/Products/Release/NameAlert.app"
+    local app="$RELEASE_DERIVED_DATA/Build/Products/Release/Takeheed.app"
     if [[ ! -d "$app" ]]; then
         fail "the build did not produce $app"
         return
     fi
-    local executable="$app/Contents/MacOS/NameAlert"
+    local executable="$app/Contents/MacOS/Takeheed"
     local whisper="$app/Contents/Frameworks/whisper.framework/Versions/A/whisper"
     local app_archs whisper_archs
     app_archs="$(lipo -archs "$executable" 2> /dev/null)" || app_archs="unreadable"
@@ -644,7 +644,7 @@ write_report() {
 
     mkdir -p "$BUILD_DIR"
     {
-        echo "# NameAlert verification report"
+        echo "# Takeheed verification report"
         echo
         echo "- Run: $STARTED_AT, $(duration $((SECONDS - SCRIPT_START))) long"
         echo "- Commit: \`$commit\` on \`$branch\`, $dirty uncommitted file(s) in the working tree"
@@ -689,7 +689,7 @@ print_summary() {
     local i
     echo
     echo "=================================================="
-    echo "NameAlert verification"
+    echo "Takeheed verification"
     echo "=================================================="
     for ((i = 0; i < ${#R_IDS[@]}; i++)); do
         printf '%-8s %s: %s\n' "${R_RESULTS[$i]}" "$(step_title "${R_IDS[$i]}")" "${R_REASONS[$i]}"
@@ -727,7 +727,7 @@ trap on_interrupt INT TERM
 
 mkdir -p "$LOG_DIR"
 
-echo "NameAlert verification, $STARTED_AT"
+echo "Takeheed verification, $STARTED_AT"
 echo "  $(git rev-parse --short HEAD 2> /dev/null) on $(git rev-parse --abbrev-ref HEAD 2> /dev/null), $(xcodebuild -version 2> /dev/null | head -1)"
 
 STEP_START=$SECONDS

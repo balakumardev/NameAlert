@@ -213,7 +213,7 @@ jobs:
       - name: Check that the app is universal
         if: steps.xcode.outputs.skip != 'true' && matrix.full
         run: |
-          app="build/DerivedData/Build/Products/Release/NameAlert.app"
+          app="build/DerivedData/Build/Products/Release/Takeheed.app"
           if [[ ! -d "$app" ]]; then
             echo "::error::$app was not built."
             exit 1

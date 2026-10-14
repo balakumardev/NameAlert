@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Builds NameAlert's Mac App Store package, dist/appstore/NameAlert.pkg.
+# Builds Takeheed's Mac App Store package, dist/appstore/Takeheed.pkg.
 #
 #   scripts/build_appstore.sh           archive, sign, check and export the package
 #   scripts/build_appstore.sh --check   run the preflight checks only: nothing is built
@@ -38,7 +38,8 @@ set -euo pipefail
 
 TEAM_ID="KHD36T7C97"
 BUNDLE_ID="dev.balakumar.namealert"
-APP_NAME="NameAlert"
+# The app's PRODUCT_NAME in project.yml: the bundle is $APP_NAME.app.
+APP_NAME="Takeheed"
 ENTITLEMENTS="NameAlert/NameAlert.entitlements"
 DERIVED_DATA="build/DerivedData-appstore"
 ARCHIVE_PATH="build/$APP_NAME.xcarchive"

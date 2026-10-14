@@ -106,7 +106,7 @@ jobs:
             echo "version=$version"
             echo "build_number=$build_number"
           } >> "$GITHUB_OUTPUT"
-          echo "NameAlert $version, build $build_number"
+          echo "Takeheed $version, build $build_number"
 
       - name: Check that every secret is set
         env:
@@ -272,7 +272,7 @@ jobs:
         env:
           VERSION: ${{ steps.plan.outputs.version }}
         run: |
-          dmg="dist/NameAlert-$VERSION.dmg"
+          dmg="dist/Takeheed-$VERSION.dmg"
           if [[ ! -f "$dmg" ]]; then
             echo "::error::scripts/build_dmg.sh finished without making $dmg."
             exit 1
@@ -289,8 +289,8 @@ jobs:
         run: |
           (
             cd dist
-            shasum -a 256 "NameAlert-$VERSION.dmg" > "NameAlert-$VERSION.dmg.sha256"
-            shasum -a 256 -c "NameAlert-$VERSION.dmg.sha256"
+            shasum -a 256 "Takeheed-$VERSION.dmg" > "Takeheed-$VERSION.dmg.sha256"
+            shasum -a 256 -c "Takeheed-$VERSION.dmg.sha256"
           )
 
           notes="$RUNNER_TEMP/release-notes.md"
@@ -327,14 +327,14 @@ jobs:
           VERSION: ${{ steps.plan.outputs.version }}
           NOTES: ${{ steps.notes.outputs.notes }}
         run: |
-          dmg="dist/NameAlert-$VERSION.dmg"
+          dmg="dist/Takeheed-$VERSION.dmg"
           sha="$dmg.sha256"
           if gh release view "$TAG" > /dev/null 2>&1; then
             # A re-run: replace the files and the notes of the release that is already there.
             gh release upload "$TAG" "$dmg" "$sha" --clobber
-            gh release edit "$TAG" --title "NameAlert $VERSION" --notes-file "$NOTES"
+            gh release edit "$TAG" --title "Takeheed $VERSION" --notes-file "$NOTES"
           else
-            gh release create "$TAG" "$dmg" "$sha" --title "NameAlert $VERSION" --notes-file "$NOTES" --verify-tag
+            gh release create "$TAG" "$dmg" "$sha" --title "Takeheed $VERSION" --notes-file "$NOTES" --verify-tag
           fi
 
       - name: Remove the keychain and API key

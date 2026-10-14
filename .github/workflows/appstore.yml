@@ -147,7 +147,7 @@ jobs:
             echo "build_number=$build_number"
             echo "submit=$submit"
           } >> "$GITHUB_OUTPUT"
-          echo "NameAlert $version, build $build_number, submit for review: $submit"
+          echo "Takeheed $version, build $build_number, submit for review: $submit"
 
       - name: Check that every secret and variable is set
         env:
@@ -451,7 +451,7 @@ jobs:
           MAS_PROFILE_PATH: ${{ steps.profile.outputs.path }}
         run: |
           bash scripts/build_appstore.sh
-          pkg=dist/appstore/NameAlert.pkg
+          pkg=dist/appstore/Takeheed.pkg
           if [[ ! -f "$pkg" ]]; then
             echo "::error::scripts/build_appstore.sh finished without making $pkg."
             exit 1
@@ -462,7 +462,7 @@ jobs:
         if: steps.existing.outputs.exists != 'true'
         run: |
           # altool finds AuthKey_<key id>.p8 in ~/.appstoreconnect/private_keys.
-          xcrun altool --validate-app -f dist/appstore/NameAlert.pkg -t macos \
+          xcrun altool --validate-app -f dist/appstore/Takeheed.pkg -t macos \
             --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
 
       - name: Upload to App Store Connect (TestFlight)
@@ -473,7 +473,7 @@ jobs:
           BUILD_NUMBER: ${{ steps.plan.outputs.build_number }}
         run: |
           asc publish testflight --app "$ASC_APP_ID" --platform MAC_OS \
-            --pkg dist/appstore/NameAlert.pkg --version "$VERSION" --build-number "$BUILD_NUMBER" \
+            --pkg dist/appstore/Takeheed.pkg --version "$VERSION" --build-number "$BUILD_NUMBER" \
             --upload-only --wait --timeout 60m --pretty
 
       - name: Find the processed build
@@ -619,7 +619,7 @@ jobs:
           SUBMIT_OUTCOME: ${{ steps.submit.outcome }}
         run: |
           {
-            echo "### NameAlert $VERSION (build $BUILD_NUMBER)"
+            echo "### Takeheed $VERSION (build $BUILD_NUMBER)"
             if [[ "$EXISTS" == "true" ]]; then
               echo "- The build was already in App Store Connect, so nothing was built or uploaded."
             else
