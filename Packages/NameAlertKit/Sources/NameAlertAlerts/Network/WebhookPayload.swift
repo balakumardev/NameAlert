@@ -2,6 +2,24 @@ import CryptoKit
 import Foundation
 import NameAlertCore
 
+/// The headers a webhook request carries that name the app: the channel sends them and Settings → Shortcuts & API
+/// shows them, both from here.
+///
+/// Receivers match on these, so they are part of the webhook's format: they keep their spelling when the name people
+/// see (`AppName.current`) changes.
+public enum WebhookHeader {
+    /// What happened: `keyword.detected`, or `test` for the hit of a test button.
+    public static let event = "X-Takeheed-Event"
+
+    /// The signature, when a signing secret is set (see `WebhookPayload.signatureHeader`).
+    public static let signature = "X-Takeheed-Signature"
+
+    /// The `User-Agent` value for a version of the app, for example `Takeheed/1.0.0`.
+    public static func userAgent(version: String) -> String {
+        "Takeheed/\(version)"
+    }
+}
+
 /// What the webhook channel sends, and how it signs it.
 ///
 /// The body is JSON with its keys in alphabetical order and no escaped slashes, so that the same hit always gives
@@ -21,7 +39,7 @@ public enum WebhookPayload {
         return try encoder.encode(payload)
     }
 
-    /// The value of the `X-NameAlert-Signature` header: `t=<unix seconds>,v1=<hex HMAC-SHA256>`. The HMAC is made
+    /// The value of the `X-Takeheed-Signature` header: `t=<unix seconds>,v1=<hex HMAC-SHA256>`. The HMAC is made
     /// with the secret as the key, over the timestamp, a dot and the body exactly as it is sent. The receiver checks
     /// it the same way, and can refuse a timestamp that is too old.
     public static func signatureHeader(body: Data, secret: String, timestamp: Int) -> String {

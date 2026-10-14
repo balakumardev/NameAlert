@@ -332,8 +332,8 @@ struct NetworkChannelsTests {
 
         let sent = try #require(server.onlyRequest)
         #expect(sent.header("X-Token") == "abc")
-        #expect(sent.header("X-NameAlert-Event") == "keyword.detected")
-        #expect(sent.header("X-NameAlert-Signature")?.hasPrefix("t=") == true)
+        #expect(sent.header("X-Takeheed-Event") == "keyword.detected")
+        #expect(sent.header("X-Takeheed-Signature")?.hasPrefix("t=") == true)
     }
 
     @Test func webhookRequestShape() async throws {
@@ -345,10 +345,10 @@ struct NetworkChannelsTests {
         #expect(sent.request.httpMethod == "POST")
         #expect(sent.request.url?.absoluteString == "https://hooks.example/alert")
         #expect(sent.header("Content-Type") == "application/json")
-        #expect(sent.header("User-Agent") == "NameAlert/1.0.0")
+        #expect(sent.header("User-Agent") == "Takeheed/1.0.0")
         #expect(sent.request.timeoutInterval == 5)
         #expect(sent.bodyText == expectedBody)
-        #expect(sent.header("X-NameAlert-Signature") == nil)  // no signing secret, no signature
+        #expect(sent.header("X-Takeheed-Signature") == nil)  // no signing secret, no signature
     }
 
     @Test func webhookRequestCarriesTheExcerptAndTheSignatureCoversIt() async throws {
@@ -362,7 +362,7 @@ struct NetworkChannelsTests {
         let sent = try #require(server.onlyRequest)
         #expect(sent.bodyText == expectedBodyWithExcerpt)
         #expect(
-            sent.header("X-NameAlert-Signature")
+            sent.header("X-Takeheed-Signature")
                 == WebhookPayload.signatureHeader(
                     body: Data(expectedBodyWithExcerpt.utf8), secret: "s3cret", timestamp: 1_700_000_000))
     }
@@ -374,7 +374,7 @@ struct NetworkChannelsTests {
             sampleHit(segmentID: "test"), settings: webhookSettings(), secrets: noSecrets)
 
         let sent = try #require(server.onlyRequest)
-        #expect(sent.header("X-NameAlert-Event") == "test")
+        #expect(sent.header("X-Takeheed-Event") == "test")
         #expect(sent.bodyText.contains(#""event":"test""#))
     }
 
@@ -388,7 +388,7 @@ struct NetworkChannelsTests {
 
         let sent = try #require(server.onlyRequest)
         #expect(
-            sent.header("X-NameAlert-Signature")
+            sent.header("X-Takeheed-Signature")
                 == WebhookPayload.signatureHeader(body: sent.body, secret: "s3cret", timestamp: 1_700_000_000))
     }
 

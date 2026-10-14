@@ -3,10 +3,10 @@ import NameAlertCore
 
 /// Posts the hit as JSON to the address the user set (see `WebhookPayload`).
 ///
-/// The request carries `X-NameAlert-Event` (`keyword.detected`, or `test` for the hit of a test button), the custom
+/// The request carries `X-Takeheed-Event` (`keyword.detected`, or `test` for the hit of a test button), the custom
 /// headers the user named (their values are read from the Keychain; a name with no value is left out), and, when a
-/// signing secret is set, `X-NameAlert-Signature`. It has 5 s to answer and is tried again after a network error or
-/// a 5xx answer (see `HTTPRetryPolicy.webhook`), never after a 4xx answer.
+/// signing secret is set, `X-Takeheed-Signature` (both named in `WebhookHeader`). It has 5 s to answer and is tried
+/// again after a network error or a 5xx answer (see `HTTPRetryPolicy.webhook`), never after a 4xx answer.
 public struct WebhookChannel: AlertChannel {
     public var kind: ChannelKind { .webhook }
 
@@ -41,8 +41,8 @@ public struct WebhookChannel: AlertChannel {
         request.httpMethod = "POST"
         request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("NameAlert/\(appVersion)", forHTTPHeaderField: "User-Agent")
-        request.setValue(event, forHTTPHeaderField: "X-NameAlert-Event")
+        request.setValue(WebhookHeader.userAgent(version: appVersion), forHTTPHeaderField: "User-Agent")
+        request.setValue(event, forHTTPHeaderField: WebhookHeader.event)
         for name in settings.webhook.headerNames {
             let field = WireText.trimmed(name)
             guard WireText.isHeaderName(field),
@@ -56,7 +56,7 @@ public struct WebhookChannel: AlertChannel {
             let timestamp = Int(now().timeIntervalSince1970)
             request.setValue(
                 WebhookPayload.signatureHeader(body: body, secret: secret, timestamp: timestamp),
-                forHTTPHeaderField: "X-NameAlert-Signature")
+                forHTTPHeaderField: WebhookHeader.signature)
         }
 
         _ = try await client.send(request, timeout: 5, retry: .webhook)

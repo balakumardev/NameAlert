@@ -1,4 +1,5 @@
 import AppKit
+import NameAlertAlerts
 import SwiftUI
 
 /// Settings → Shortcuts & API: the links that control the app from outside, the actions it adds to Shortcuts, and what
@@ -98,7 +99,7 @@ struct APISettingsView: View {
             SettingsSectionTitle("Check the signature")
         } footer: {
             SettingsCaption(
-                "With a signing secret set, each request has an X-NameAlert-Signature header like t=1760175000,v1=<hex>. Sign the body exactly as you received it, before any JSON parsing.")
+                "With a signing secret set, each request has an \(WebhookHeader.signature) header like t=1760175000,v1=<hex>. Sign the body exactly as you received it, before any JSON parsing.")
         }
     }
 }
@@ -169,10 +170,10 @@ enum APIReference {
         ShortcutAction(name: "Get Status", summary: "What \(AppInfo.displayName) is doing."),
     ]
 
-    /// The check a receiver makes to know a request came from NameAlert.
+    /// The check a receiver makes to know a request came from Takeheed.
     static let signatureSnippet = """
         expected = hex(HMAC_SHA256(secret, t + "." + raw_body))
-        compare with the v1 value in X-NameAlert-Signature
+        compare with the v1 value in \(WebhookHeader.signature)
         """
 
     /// The head of a webhook request: the headers it carries.
@@ -180,9 +181,9 @@ enum APIReference {
         """
         POST https://example.com/your-hook
         Content-Type: application/json
-        User-Agent: NameAlert/\(version)
-        X-NameAlert-Event: keyword.detected
-        X-NameAlert-Signature: t=1760175000,v1=<hex>
+        User-Agent: \(WebhookHeader.userAgent(version: version))
+        \(WebhookHeader.event): keyword.detected
+        \(WebhookHeader.signature): t=1760175000,v1=<hex>
         """
     }
 

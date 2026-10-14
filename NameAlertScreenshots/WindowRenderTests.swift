@@ -546,7 +546,7 @@ struct HistoryApiAboutLogicTests {
     func signatureSnippetMatchesTheApp() throws {
         #expect(APIReference.signatureSnippet == """
             expected = hex(HMAC_SHA256(secret, t + "." + raw_body))
-            compare with the v1 value in X-NameAlert-Signature
+            compare with the v1 value in X-Takeheed-Signature
             """)
         let body = Data(#"{"event":"keyword.detected"}"#.utf8)
         let secret = "s3cret"
@@ -558,8 +558,8 @@ struct HistoryApiAboutLogicTests {
         let expected = mac.map { String(format: "%02x", $0) }.joined()
         let header = WebhookPayload.signatureHeader(body: body, secret: secret, timestamp: t)
         #expect(header == "t=\(t),v1=\(expected)")
-        #expect(APIReference.requestExample(version: "1.0.0").contains("X-NameAlert-Signature: t="))
-        #expect(APIReference.requestExample(version: "1.0.0").contains("User-Agent: NameAlert/1.0.0"))
+        #expect(APIReference.requestExample(version: "1.0.0").contains("X-Takeheed-Signature: t="))
+        #expect(APIReference.requestExample(version: "1.0.0").contains("User-Agent: Takeheed/1.0.0"))
     }
 
     // MARK: About
