@@ -30,6 +30,9 @@ final class WindowRouter {
     /// setup that starts at Welcome, not the one that was left half way.
     private(set) var onboardingRequests = 0
 
+    /// The Settings pane asked for with `openSettings(at:)`, until Settings takes it.
+    private(set) var requestedSection: SettingsSection?
+
     init() {}
 
     /// Asks for a window. Asking for setup starts it over, unless `startsOver` is false: that brings forward the setup
@@ -43,6 +46,18 @@ final class WindowRouter {
     func takePending() -> Destination? {
         defer { pending = nil }
         return pending
+    }
+
+    /// Opens Settings on `section`, for code outside Settings: the menu bar popover's "See Pro…".
+    func openSettings(at section: SettingsSection) {
+        requestedSection = section
+        open(.settings)
+    }
+
+    /// Hands over the pane asked for and forgets it.
+    func takeRequestedSection() -> SettingsSection? {
+        defer { requestedSection = nil }
+        return requestedSection
     }
 }
 

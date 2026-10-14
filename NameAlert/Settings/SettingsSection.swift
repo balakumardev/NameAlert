@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The panes of the Settings window, in the order of its sidebar.
 enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
-    case general, rules, alerts, speech, history, shortcuts, about
+    case general, rules, alerts, speech, history, shortcuts, pro, about
 
     var id: Self { self }
 
@@ -14,6 +14,7 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         case .speech: "Speech"
         case .history: "History"
         case .shortcuts: "Shortcuts & API"
+        case .pro: "Pro"
         case .about: "About"
         }
     }
@@ -26,8 +27,14 @@ enum SettingsSection: String, CaseIterable, Identifiable, Hashable {
         case .speech: "waveform"
         case .history: "clock"
         case .shortcuts: "curlybraces"
+        case .pro: "star.circle"
         case .about: "info.circle"
         }
+    }
+
+    /// The panes the sidebar lists, in order: Pro only in the build that sells it.
+    static func sidebar(showsPro: Bool) -> [SettingsSection] {
+        allCases.filter { showsPro || $0 != .pro }
     }
 }
 

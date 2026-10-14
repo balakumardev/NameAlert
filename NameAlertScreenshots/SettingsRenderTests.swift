@@ -160,13 +160,16 @@ final class FakeLoginItem: LoginItemService {
 @Suite("Settings copy and logic")
 @MainActor
 struct SettingsLogicTests {
-    @Test("The sidebar lists the seven panes with symbols that exist")
+    @Test("The sidebar lists seven panes, and Pro only in the build that sells it, with symbols that exist")
     func sections() {
-        #expect(SettingsSection.allCases.map(\.title) == [
+        #expect(SettingsSection.sidebar(showsPro: false).map(\.title) == [
             "General", "Rules", "Alerts", "Speech", "History", "Shortcuts & API", "About",
         ])
+        #expect(SettingsSection.sidebar(showsPro: true).map(\.title) == [
+            "General", "Rules", "Alerts", "Speech", "History", "Shortcuts & API", "Pro", "About",
+        ])
         #expect(SettingsSection.allCases.map(\.systemImage) == [
-            "gearshape", "text.badge.checkmark", "bell", "waveform", "clock", "curlybraces", "info.circle",
+            "gearshape", "text.badge.checkmark", "bell", "waveform", "clock", "curlybraces", "star.circle", "info.circle",
         ])
         for section in SettingsSection.allCases {
             #expect(NSImage(systemSymbolName: section.systemImage, accessibilityDescription: nil) != nil)

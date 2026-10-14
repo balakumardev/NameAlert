@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         NotificationActions.register()
         UNUserNotificationCenter.current().delegate = self
         observeSleepAndWake()
+        environment.startPurchases()
         environment.launch()
     }
 
@@ -31,6 +32,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         guard AppEnvironment.isLive else { return }
         let controller = environment.controller
         Task { await controller.refreshPermissions() }
+        // A refund or a purchase on another Mac may have happened while the app was in the background.
+        let store = environment.store
+        Task { await store.refresh() }
         OtherCopies.shared.refresh()
     }
 
@@ -63,12 +67,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private func observeSleepAndWake() {
         let center = NSWorkspace.shared.notificationCenter
         let controller = environment.controller
+        let store = environment.store
         workspaceObservers = [
             center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { _ in
                 Task { @MainActor in await controller.systemWillSleep() }
             },
             center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
-                Task { @MainActor in await controller.systemDidWake() }
+                Task { @MainActor in
+                    await controller.systemDidWake()
+                    await store.refresh()
+                }
             },
         ]
     }

@@ -10,14 +10,19 @@ import UserNotifications
 @MainActor
 final class AppEnvironment {
     static let shared: AppEnvironment = {
-        let controller = ListeningController(dependencies: .live(appVersion: AppInfo.version, build: AppInfo.build))
+        let store = ProStore.shared
+        // A Pro owner has Pro from the first moment: the store's answer at launch is the last verified one.
+        let controller = ListeningController(
+            dependencies: .live(appVersion: AppInfo.version, build: AppInfo.build), proAccess: store.access)
         // The alarm panel's Snooze button and the local model's falling-behind warning reach the controller here.
         ControllerBox.shared.controller = controller
-        return AppEnvironment(controller: controller, router: WindowRouter())
+        return AppEnvironment(controller: controller, router: WindowRouter(), store: store)
     }()
 
     let controller: ListeningController
     let router: WindowRouter
+    /// Sells Pro in the App Store build. In every other build it sells nothing, and everything is on.
+    let store: ProStore
     /// The Keychain secrets the Alerts settings edit. It reads nothing until a pane asks.
     let secrets = SecretsModel()
 
@@ -35,10 +40,21 @@ final class AppEnvironment {
         #endif
     }()
 
-    /// The app uses `shared`; tests make their own, on a controller with stand-ins.
-    init(controller: ListeningController, router: WindowRouter) {
+    /// The app uses `shared`; tests make their own, on a controller with stand-ins and a store that sells nothing unless
+    /// they pass one.
+    init(controller: ListeningController, router: WindowRouter, store: ProStore = ProStore(isEnforced: false, cache: nil)) {
         self.controller = controller
         self.router = router
+        self.store = store
+    }
+
+    /// Starts selling Pro, in the build that does: every change of what this copy may do reaches the controller. The app
+    /// calls this once, at launch, before anything waits on StoreKit.
+    func startPurchases() {
+        let controller = controller
+        store.start { access in
+            Task { await controller.setProAccess(access) }
+        }
     }
 
     /// Loads the settings, starts listening if setup is done and the user wants it at launch, and opens setup until
@@ -148,5 +164,6 @@ extension View {
             .environment(environment.controller)
             .environment(environment.router)
             .environment(environment.secrets)
+            .environment(environment.store)
     }
 }

@@ -23,7 +23,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
             List(selection: sidebarSelection) {
-                ForEach(SettingsSection.allCases) { section in
+                ForEach(SettingsSection.sidebar(showsPro: false)) { section in
                     Label(section.title, systemImage: section.systemImage)
                         .tag(section)
                         .accessibilityLabel(section.title)
@@ -71,6 +71,8 @@ struct SettingsView: View {
             HistorySettingsView()
         case .shortcuts:
             APISettingsView()
+        case .pro:
+            ContentUnavailableView(ProCopy.title, systemImage: SettingsSection.pro.systemImage)
         case .about:
             AboutSettingsView()
         }
