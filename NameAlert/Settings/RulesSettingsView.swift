@@ -62,12 +62,13 @@ struct RulesSettingsView: View {
     }
 
     private func ruleList(_ rules: [Rule], chosen: Rule.ID?) -> some View {
-        let heldBack = controller.proPolicy.heldBackRuleIDs(in: rules)
+        let policy = controller.proPolicy
+        let heldBack = policy.heldBackRuleIDs(in: rules)
         return List(selection: Binding(get: { chosen }, set: { selection = $0 })) {
             ForEach(rules) { rule in
                 RuleRow(
                     rule: rule,
-                    isHeldBack: heldBack.contains(rule.id),
+                    isHeldBack: Self.showsProBadge(rule, heldBack: heldBack, policy: policy),
                     isEnabled: Binding(
                         get: { rule.isEnabled },
                         set: { enabled in controller.edit(rule: rule.id) { $0.isEnabled = enabled } })
@@ -77,6 +78,11 @@ struct RulesSettingsView: View {
         }
         .listStyle(.inset(alternatesRowBackgrounds: false))
         .accessibilityLabel("Rules")
+    }
+
+    /// Whether a rule's row shows the Pro badge: the rule is past Free's limit, or alerts only in ways Free does not send.
+    static func showsProBadge(_ rule: Rule, heldBack: Set<Rule.ID>, policy: ProPolicy) -> Bool {
+        heldBack.contains(rule.id) || policy.alertsOnlyThroughPro(rule)
     }
 
     /// Adds a rule, or opens the Pro sheet when Free has its most rules already. The controller checks the limit again in

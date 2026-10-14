@@ -57,6 +57,12 @@ public struct ProPolicy: Sendable, Equatable {
         return heldBack
     }
 
+    /// Whether `rule` alerts only in ways Free does not send (ntfy, a Telegram call, a webhook): on Free it is heard and kept
+    /// in History, and alerts nowhere. Always `false` on Pro.
+    public func alertsOnlyThroughPro(_ rule: Rule) -> Bool {
+        !isPro && !rule.channels.isEmpty && rule.channels.isSubset(of: Self.proChannels)
+    }
+
     /// The channels of `rule` that Free does not send. Empty on Pro.
     public func heldBackChannels(of rule: Rule) -> Set<ChannelKind> {
         isPro ? [] : rule.channels.intersection(Self.proChannels)

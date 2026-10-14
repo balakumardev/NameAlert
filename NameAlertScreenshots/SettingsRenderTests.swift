@@ -528,6 +528,18 @@ private struct ModelRowsSheet: View {
 @Suite("Alerts and Speech logic")
 @MainActor
 struct AlertsAndSpeechLogicTests {
+    @Test("On Free, Rules badges a rule past the limit and one that alerts only in ways Free does not send")
+    func proBadgesInRules() {
+        let free = ProPolicy(access: .free)
+        let phoneOnly = Rule(name: "Phone", terms: ["phone"], channels: [.ntfy])
+        let mixed = Rule(name: "Mixed", terms: ["mixed"], channels: [.sound, .ntfy])
+        let late = Rule(name: "Late", terms: ["late"])
+        #expect(RulesSettingsView.showsProBadge(phoneOnly, heldBack: [], policy: free))
+        #expect(!RulesSettingsView.showsProBadge(mixed, heldBack: [], policy: free))
+        #expect(RulesSettingsView.showsProBadge(late, heldBack: [late.id], policy: free))
+        #expect(!RulesSettingsView.showsProBadge(phoneOnly, heldBack: [], policy: ProPolicy(access: .pro)))
+    }
+
     @Test("On Free, an alert that leaves the Mac cannot be chosen, but one that is chosen can be unchosen")
     func proChannelCheckboxes() {
         #expect(RuleEditorView.isChannelDisabled(isConfigured: true, isChecked: false, needsPro: true))

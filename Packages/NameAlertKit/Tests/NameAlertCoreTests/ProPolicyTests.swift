@@ -57,6 +57,14 @@ struct ProPolicyTests {
         #expect(free.heldBackChannels(of: rule("Charlie", channels: [.sound])).isEmpty)
     }
 
+    @Test func aRuleThatAlertsOnlyThroughProAlertsNowhereOnFree() {
+        let phoneOnly = rule("Phone", channels: [.ntfy, .webhook])
+        #expect(free.alertsOnlyThroughPro(phoneOnly))
+        #expect(!free.alertsOnlyThroughPro(rule("Mixed", channels: [.sound, .ntfy])))
+        #expect(!free.alertsOnlyThroughPro(rule("Silent", channels: [])))
+        #expect(!pro.alertsOnlyThroughPro(phoneOnly))
+    }
+
     @Test func proChangesNothing() {
         let rules = (1...12).map { rule("Rule \($0)", channels: Set(ChannelKind.allCases)) }
         #expect(pro.alertingRules(rules) == rules)
