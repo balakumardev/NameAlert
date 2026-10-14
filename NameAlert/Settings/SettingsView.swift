@@ -1,12 +1,12 @@
+import AppKit
 import NameAlertRuntime
 import SwiftUI
 
 /// The Settings window: a sidebar of panes with the chosen one beside it.
 ///
-/// The content is at least 760 × 540 points. The `Settings` scene turns that into the window's own minimum, which was
-/// read back from the open window: `contentMinSize` 760 × 628, the content's 540 plus 88 points of title bar and
-/// toolbar. The scene makes its window fixed in size, so it opens at 900 × 628 and the minimum only matters for a
-/// saved frame that is too small.
+/// The content is at least 760 × 540 points. The `Settings` scene turns that into the window's own minimum, and makes
+/// its window fixed in size: it opens at 900 × 580, the content's 540 plus the 40 points of its compact title bar
+/// (`CompactTitleBar`). The minimum only matters for a saved frame that is too small.
 struct SettingsView: View {
     static let minimumSize = CGSize(width: 760, height: 540)
 
@@ -38,6 +38,7 @@ struct SettingsView: View {
         .toolbar(removing: .sidebarToggle)
         .environment(\.settingsNavigation, SettingsNavigation { selection = $0 })
         .frame(minWidth: Self.minimumSize.width, minHeight: Self.minimumSize.height)
+        .background(CompactTitleBar())
         .onChange(of: selection) { _, section in
             UserDefaults.standard.set(section.rawValue, forKey: Self.lastSectionKey)
         }
@@ -72,6 +73,25 @@ struct SettingsView: View {
             APISettingsView()
         case .about:
             AboutSettingsView()
+        }
+    }
+}
+
+/// Gives the window the view is in the compact unified toolbar: one 40-point row with the title, the traffic lights and
+/// the sidebar's toolbar. The `Settings` scene gives its window the preference style, which puts the title on a row of
+/// its own above the toolbar: 88 points with the split view's toolbar. The scene ignores `windowToolbarStyle(_:)` and
+/// `toolbar(.hidden, for: .windowToolbar)`, so the style is set on the window, before it is first shown.
+private struct CompactTitleBar: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        StyleView()
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {}
+
+    private final class StyleView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            window?.toolbarStyle = .unifiedCompact
         }
     }
 }
