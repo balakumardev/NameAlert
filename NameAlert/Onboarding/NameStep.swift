@@ -1,4 +1,5 @@
 import NameAlertCore
+import NameAlertRuntime
 import SwiftUI
 
 /// Step 4: the name to listen for, other ways it may be spelled, how closely to match and how to be alerted. It
@@ -10,10 +11,13 @@ struct NameStep: View {
 
     @FocusState private var isNameFocused: Bool
     @FocusState private var areVariantsFocused: Bool
+    @Environment(ListeningController.self) private var controller
 
     static let variantsPrompt = "Nicknames or spellings, e.g. Bala, Balakumar"
     static let alertQuestion = "How should we alert you?"
     static let laterNote = "ntfy, Telegram and webhook alerts can be set up later in Settings."
+    /// The same note in the build that sells Pro, on Free.
+    static let laterNoteFree = "Alerts to your phone and webhooks are part of Pro, in Settings."
 
     var body: some View {
         OnboardingStepLayout(title: "What should \(AppInfo.displayName) listen for?") {
@@ -86,7 +90,7 @@ struct NameStep: View {
                     channelColumn(Array(OnboardingModel.offeredChannels.prefix(2)))
                     channelColumn(Array(OnboardingModel.offeredChannels.dropFirst(2)))
                 }
-                SettingsCaption(Self.laterNote)
+                SettingsCaption(controller.proPolicy.allows(.ntfy) ? Self.laterNote : Self.laterNoteFree)
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)

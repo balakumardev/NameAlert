@@ -6,11 +6,14 @@ import NameAlertCore
 enum IntentFailure: Error, CustomLocalizedStringResourceConvertible {
     case emptyKeyword
     case ruleNotFound
+    case ruleLimit
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
         case .emptyKeyword: "Type a word or phrase to listen for."
         case .ruleNotFound: "That rule no longer exists."
+        case .ruleLimit:
+            "Free alerts with up to \(ProPolicy.freeRuleLimit) rules. Pick a rule to add the word to, or get Pro in Settings."
         }
     }
 }
@@ -38,22 +41,24 @@ struct AddKeywordIntent: AppIntent {
     func perform() async throws -> some IntentResult & ReturnsValue<RuleEntity> & ProvidesDialog {
         guard let keyword = PopoverActions.keyword(from: term) else { throw IntentFailure.emptyKeyword }
         let controller = await IntentEnvironment.controller()
-        let chosenRuleID = rule?.id
-        var saved: Rule?
-        await controller.update { configuration in
-            if let chosenRuleID {
+        let saved: Rule
+        if let chosenRuleID = rule?.id {
+            var updated: Rule?
+            await controller.update { configuration in
                 guard let index = configuration.rules.firstIndex(where: { $0.id == chosenRuleID }) else { return }
                 if !configuration.rules[index].terms.contains(where: { Self.isSameWord($0, keyword) }) {
                     configuration.rules[index].terms.append(keyword)
                 }
-                saved = configuration.rules[index]
-            } else {
-                let new = Rule(name: keyword, terms: [keyword])
-                configuration.rules.append(new)
-                saved = new
+                updated = configuration.rules[index]
             }
+            guard let updated else { throw IntentFailure.ruleNotFound }
+            saved = updated
+        } else {
+            let new = Rule(name: keyword, terms: [keyword])
+            // Free's most rules are there: the controller refuses, and Shortcuts says why.
+            guard await controller.addRule(new) else { throw IntentFailure.ruleLimit }
+            saved = new
         }
-        guard let saved else { throw IntentFailure.ruleNotFound }
         return .result(value: RuleEntity(saved), dialog: IntentEnvironment.dialog("Added “\(keyword)”."))
     }
 
@@ -86,7 +91,13 @@ struct SetRuleEnabledIntent: AppIntent {
             saved = configuration.rules[index]
         }
         guard let saved else { throw IntentFailure.ruleNotFound }
-        let dialog = isEnabled ? "Turned on “\(saved.name)”." : "Turned off “\(saved.name)”."
+        let heldBack = controller.proPolicy.heldBackRuleIDs(in: controller.configuration.rules).contains(saved.id)
+        let dialog =
+            isEnabled
+            ? (heldBack
+                ? "Turned on “\(saved.name)”. It alerts with Pro, or once another rule is off."
+                : "Turned on “\(saved.name)”.")
+            : "Turned off “\(saved.name)”."
         return .result(value: RuleEntity(saved), dialog: IntentEnvironment.dialog(dialog))
     }
 }

@@ -36,7 +36,8 @@ struct ChannelTestRow: View {
 
     var body: some View {
         let blocked = Self.blockedReason(
-            for: kind, channels: controller.configuration.channels, notifications: controller.permissions.notifications)
+            for: kind, channels: controller.configuration.channels, notifications: controller.permissions.notifications,
+            policy: controller.proPolicy)
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 Button("Test", action: run)
@@ -105,8 +106,10 @@ struct ChannelTestRow: View {
 
     /// Why a test cannot be sent yet, or `nil` when it can.
     static func blockedReason(
-        for kind: ChannelKind, channels: ChannelSettings, notifications: PermissionStatus
+        for kind: ChannelKind, channels: ChannelSettings, notifications: PermissionStatus,
+        policy: ProPolicy = ProPolicy(access: .pro)
     ) -> String? {
+        if !policy.allows(kind) { return ProCopy.testNeedsPro }
         if kind == .notification, notifications != .granted { return "Turn on notifications first." }
         return channels.isConfigured(kind) ? nil : "Fill in the settings above to test."
     }
@@ -333,10 +336,14 @@ struct ScreenFlashSection: View {
 
 struct NtfySection: View {
     @Environment(ListeningController.self) private var controller
+    @Environment(\.proUpsell) private var upsell
 
     var body: some View {
         let ntfy = controller.configuration.channels.ntfy
         Section {
+            if !controller.proPolicy.allows(.ntfy) {
+                ProRequiredRow(kind: .ntfy) { upsell.show(.channel(.ntfy)) }
+            }
             VStack(alignment: .leading, spacing: 4) {
                 LabeledTextField(title: "Server", value: ntfy.server, prompt: "https://ntfy.sh") { server in
                     controller.edit { $0.channels.ntfy.server = server }
@@ -389,10 +396,14 @@ struct TelegramSection: View {
     static let setupAddress = URL(string: "https://www.callmebot.com/telegram-call-api/")
 
     @Environment(ListeningController.self) private var controller
+    @Environment(\.proUpsell) private var upsell
 
     var body: some View {
         let call = controller.configuration.channels.telegramCall
         Section {
+            if !controller.proPolicy.allows(.telegramCall) {
+                ProRequiredRow(kind: .telegramCall) { upsell.show(.channel(.telegramCall)) }
+            }
             LabeledTextField(
                 title: "Telegram username or phone", value: call.user, prompt: "@username or +15551234567"
             ) { user in
@@ -442,6 +453,7 @@ struct WebhookSection: View {
     @Environment(ListeningController.self) private var controller
     @Environment(SecretsModel.self) private var secrets
     @Environment(\.settingsNavigation) private var navigation
+    @Environment(\.proUpsell) private var upsell
 
     @State private var isAddingHeader = false
     @State private var newName = ""
@@ -450,6 +462,9 @@ struct WebhookSection: View {
     var body: some View {
         let webhook = controller.configuration.channels.webhook
         Section {
+            if !controller.proPolicy.allows(.webhook) {
+                ProRequiredRow(kind: .webhook) { upsell.show(.channel(.webhook)) }
+            }
             VStack(alignment: .leading, spacing: 4) {
                 LabeledTextField(title: "URL", value: webhook.url, prompt: "https://example.com/hook") { url in
                     controller.edit { $0.channels.webhook.url = url }

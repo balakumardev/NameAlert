@@ -319,6 +319,8 @@ struct OnboardingLogicTests {
         #expect(NameStep.variantsPrompt == "Nicknames or spellings, e.g. Bala, Balakumar")
         #expect(NameStep.alertQuestion == "How should we alert you?")
         #expect(NameStep.laterNote.contains("set up later in Settings"))
+        #expect(NameStep.laterNoteFree.contains("Pro"))
+        #expect(!NameStep.laterNoteFree.contains("set up later"), "on Free those alerts are not just a later step")
         #expect(OnboardingModel.offeredChannels.map(\.displayName) == [
             "Sound", "Notification", "Alarm until dismissed", "Screen flash",
         ])

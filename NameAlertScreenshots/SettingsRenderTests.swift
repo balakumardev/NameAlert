@@ -122,6 +122,43 @@ struct SettingsRenderTests {
         }
         try RenderHarness.render(view, size: settingsSize, name: "settings-rules-empty")
     }
+
+    /// Four rules that are on, so the fourth (Launch) is past Free's limit, and a first rule that also alerts through ntfy,
+    /// which Free does not send.
+    static var freeRulesConfiguration: AppConfiguration {
+        var configuration = DemoFixtures.settingsConfiguration
+        configuration.rules[0].channels = [.sound, .notification, .ntfy]
+        configuration.rules[2].isEnabled = true
+        configuration.rules.append(Rule(name: "Launch", terms: ["launch", "launch day"], channels: [.notification]))
+        configuration.channels.ntfy.topic = "bala-alerts-7f3k"
+        return configuration
+    }
+
+    @Test("On Free, Rules marks the rule past the limit and the alerts that need Pro", arguments: [false, true])
+    func rulesOnFree(dark: Bool) throws {
+        let view = SettingsRenderFrame {
+            SettingsView(section: .rules)
+                .environment(DemoFixtures.controller(.off, configuration: Self.freeRulesConfiguration, proAccess: .free))
+                .environment(presentedStore(.free))
+        }
+        try RenderHarness.render(
+            view, size: CGSize(width: 760, height: 980), name: "settings-rules-free" + (dark ? "-dark" : ""),
+            appearance: dark ? .darkAqua : .aqua)
+    }
+
+    @Test("On Free, the editor of the rule past the limit says why it does not alert")
+    func heldBackRuleEditor() throws {
+        let configuration = Self.freeRulesConfiguration
+        let launch = try #require(configuration.rules.last)
+        let controller = DemoFixtures.controller(.off, configuration: configuration, proAccess: .free)
+        #expect(controller.proPolicy.heldBackRuleIDs(in: configuration.rules) == [launch.id])
+        let view = SettingsRenderFrame {
+            RuleEditorView(ruleID: launch.id)
+                .frame(width: 520, height: 900)
+                .environment(controller)
+        }
+        try RenderHarness.render(view, size: CGSize(width: 520, height: 900), name: "settings-rule-held-back")
+    }
 }
 
 /// Shows Settings as the open window is drawn: as the key window, on the window background.
@@ -346,6 +383,23 @@ struct SettingsLogicTests {
 // MARK: - Alerts and Speech renders
 
 extension SettingsRenderTests {
+    @Test("On Free, Alerts says which alerts need Pro and keeps their settings", arguments: [false, true])
+    func alertsOnFree(dark: Bool) async throws {
+        let controller = await SettingsFixtures.controller(
+            configuration: SettingsFixtures.alertsConfiguration, proAccess: .free)
+        let view = SettingsRenderFrame {
+            SettingsView(section: .alerts)
+                .environment(controller)
+                .environment(SecretsModel(store: InMemorySecretStore()))
+                .environment(presentedStore(.free))
+        }
+        let suffix = dark ? "-dark" : ""
+        let appearance: NSAppearance.Name = dark ? .darkAqua : .aqua
+        try await RenderHarness.render(
+            view, size: CGSize(width: 760, height: 1900), name: "settings-alerts-free-full" + suffix,
+            appearance: appearance, afterWaiting: settleTime)
+    }
+
     @Test("Alerts renders from its top and from its bottom, and whole", arguments: [false, true])
     func alerts(dark: Bool) async throws {
         let configuration = SettingsFixtures.alertsConfiguration
@@ -474,6 +528,28 @@ private struct ModelRowsSheet: View {
 @Suite("Alerts and Speech logic")
 @MainActor
 struct AlertsAndSpeechLogicTests {
+    @Test("On Free, an alert that leaves the Mac cannot be chosen, but one that is chosen can be unchosen")
+    func proChannelCheckboxes() {
+        #expect(RuleEditorView.isChannelDisabled(isConfigured: true, isChecked: false, needsPro: true))
+        #expect(!RuleEditorView.isChannelDisabled(isConfigured: true, isChecked: true, needsPro: true))
+        #expect(RuleEditorView.isChannelDisabled(isConfigured: false, isChecked: false, needsPro: true))
+    }
+
+    @Test("On Free, the Test button of an alert that leaves the Mac says it needs Pro")
+    func proTestsAreBlocked() {
+        var channels = ChannelSettings()
+        channels.ntfy.topic = "my-topic"
+        channels.telegramCall.user = "@me"
+        channels.webhook.url = "https://example.com/hook"
+        let free = ProPolicy(access: .free)
+        for kind in [ChannelKind.ntfy, .telegramCall, .webhook] {
+            #expect(ChannelTestRow.blockedReason(for: kind, channels: channels, notifications: .granted, policy: free) == "Needs Pro.")
+        }
+        for kind in [ChannelKind.sound, .persistentAlarm, .screenFlash] {
+            #expect(ChannelTestRow.blockedReason(for: kind, channels: channels, notifications: .granted, policy: free) == nil)
+        }
+    }
+
     private struct RefusingStore: SecretStore {
         func secret(for account: String) -> String? { nil }
         func setSecret(_ value: String?, for account: String) throws { throw KeychainError(status: -25308) }

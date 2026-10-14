@@ -1,10 +1,14 @@
 import AppKit
 import NameAlertAlerts
+import NameAlertCore
+import NameAlertRuntime
 import SwiftUI
 
 /// Settings → Shortcuts & API: the links that control the app from outside, the actions it adds to Shortcuts, and what
 /// a webhook receives, including how to check its signature.
 struct APISettingsView: View {
+    @Environment(ListeningController.self) private var controller
+
     var body: some View {
         Form {
             urlSchemeSection
@@ -76,6 +80,9 @@ struct APISettingsView: View {
 
     private var webhookSection: some View {
         Section {
+            if !controller.proPolicy.allows(.webhook) {
+                SettingsCaption(ProCopy.webhookIsPro)
+            }
             CodeBlock(
                 title: "Request", code: APIReference.requestExample(version: AppInfo.version),
                 what: "the webhook request example")

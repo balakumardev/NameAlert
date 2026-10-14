@@ -7,6 +7,7 @@ struct RulesSettingsView: View {
     static let listWidth: CGFloat = 240
 
     @Environment(ListeningController.self) private var controller
+    @Environment(\.proUpsell) private var upsell
 
     @State private var selection: Rule.ID?
     @State private var pendingDeletion: Rule?
@@ -61,10 +62,12 @@ struct RulesSettingsView: View {
     }
 
     private func ruleList(_ rules: [Rule], chosen: Rule.ID?) -> some View {
-        List(selection: Binding(get: { chosen }, set: { selection = $0 })) {
+        let heldBack = controller.proPolicy.heldBackRuleIDs(in: rules)
+        return List(selection: Binding(get: { chosen }, set: { selection = $0 })) {
             ForEach(rules) { rule in
                 RuleRow(
                     rule: rule,
+                    isHeldBack: heldBack.contains(rule.id),
                     isEnabled: Binding(
                         get: { rule.isEnabled },
                         set: { enabled in controller.edit(rule: rule.id) { $0.isEnabled = enabled } })
@@ -76,11 +79,24 @@ struct RulesSettingsView: View {
         .accessibilityLabel("Rules")
     }
 
+    /// Adds a rule, or opens the Pro sheet when Free has its most rules already. The controller checks the limit again in
+    /// its own turn, so a second quick click cannot slip past it.
     private func addRule() {
+        guard controller.proPolicy.canAddRule(to: controller.configuration.rules) else {
+            upsell.show(.ruleLimit)
+            return
+        }
         let rule = Rule(name: "New rule", terms: [])
-        controller.edit { $0.rules.append(rule) }
         selection = rule.id
         addedRuleID = rule.id
+        Task {
+            guard await controller.addRule(rule) else {
+                selection = nil
+                addedRuleID = nil
+                upsell.show(.ruleLimit)
+                return
+            }
+        }
     }
 
     private func delete(_ rule: Rule, from rules: [Rule]) {
@@ -97,19 +113,23 @@ struct RulesSettingsView: View {
 /// One rule in the list: its name, the words it listens for, and whether it is on.
 struct RuleRow: View {
     let rule: Rule
+    var isHeldBack = false
     @Binding var isEnabled: Bool
 
     var body: some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: Self.title(of: rule))
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(verbatim: Self.title(of: rule))
+                        .lineLimit(1)
+                    if isHeldBack { ProBadge() }
+                }
                 Text(verbatim: Self.summary(of: rule))
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
-            .opacity(rule.isEnabled ? 1 : 0.6)
+            .opacity(rule.isEnabled && !isHeldBack ? 1 : 0.6)
             Spacer(minLength: 4)
             Toggle("Enabled", isOn: $isEnabled)
                 .toggleStyle(.switch)

@@ -80,6 +80,19 @@ struct PopoverRenderTests {
         try RenderHarness.render(PopoverRenderFrame { popover }, name: "popover-adding-keyword")
     }
 
+    @Test("On Free with three rules, Add keyword shows the limit and the way to Pro")
+    func ruleLimitNote() throws {
+        var configuration = DemoFixtures.configuration
+        configuration.rules.append(Rule(name: "Launch", terms: ["launch"]))
+        let controller = DemoFixtures.controller(.off, configuration: configuration, proAccess: .free)
+        #expect(!controller.proPolicy.canAddRule(to: controller.configuration.rules))
+        let actions = PopoverActions(isShowingRuleLimit: true)
+            .frame(width: MenuBarPopover.width)
+            .environment(controller)
+            .environment(WindowRouter())
+        try RenderHarness.render(PopoverRenderFrame { actions }, name: "popover-rule-limit")
+    }
+
     static func controller(for scenario: Scenario) async -> ListeningController {
         switch scenario {
         case .listening:

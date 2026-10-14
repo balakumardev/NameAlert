@@ -8,16 +8,20 @@ import SwiftUI
 /// Notification alerts.
 struct PopoverActions: View {
     @Environment(ListeningController.self) private var controller
+    @Environment(WindowRouter.self) private var router: WindowRouter?
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var isAddingKeyword: Bool
+    @State private var isShowingRuleLimit: Bool
     @State private var draft = ""
     @State private var lastAdded: String?
     @FocusState private var isFieldFocused: Bool
 
-    /// `isAddingKeyword` opens the field from the start, for renders.
-    init(isAddingKeyword: Bool = false) {
+    /// `isAddingKeyword` opens the field from the start, and `isShowingRuleLimit` the note about Free's rules, for renders.
+    init(isAddingKeyword: Bool = false, isShowingRuleLimit: Bool = false) {
         _isAddingKeyword = State(initialValue: isAddingKeyword)
+        _isShowingRuleLimit = State(initialValue: isShowingRuleLimit)
     }
 
     var body: some View {
@@ -25,16 +29,16 @@ struct PopoverActions: View {
             HStack(spacing: 8) {
                 SnoozeMenu()
                 Spacer(minLength: 8)
-                Button {
-                    setAddingKeyword(!isAddingKeyword)
-                } label: {
+                Button(action: addKeywordTapped) {
                     Label("Add keyword", systemImage: "plus")
                 }
                 .accessibilityLabel(isAddingKeyword ? "Close the new keyword field" : "Add a keyword")
             }
             .buttonStyle(.bordered)
 
-            if isAddingKeyword {
+            if isShowingRuleLimit {
+                ruleLimitNote
+            } else if isAddingKeyword {
                 keywordField
             } else if let lastAdded {
                 Label {
@@ -70,6 +74,28 @@ struct PopoverActions: View {
         .onAppear { isFieldFocused = true }
     }
 
+    /// Free has its most rules: a new keyword would be a rule that does not alert.
+    private var ruleLimitNote: some View {
+        NoticeRow(systemImage: "lock.fill", tint: .accentColor, message: ProCopy.popoverRuleLimit) {
+            Button(ProCopy.seeProTitle) {
+                router?.openSettings(at: .pro)
+                dismiss()
+            }
+            .accessibilityLabel("See Pro in Settings")
+        }
+    }
+
+    private func addKeywordTapped() {
+        if isAddingKeyword || isShowingRuleLimit {
+            isShowingRuleLimit = false
+            setAddingKeyword(false)
+        } else if controller.proPolicy.canAddRule(to: controller.configuration.rules) {
+            setAddingKeyword(true)
+        } else {
+            isShowingRuleLimit = true
+        }
+    }
+
     private func setAddingKeyword(_ adding: Bool) {
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) {
             isAddingKeyword = adding
@@ -79,9 +105,15 @@ struct PopoverActions: View {
 
     private func addKeyword() {
         guard let keyword = Self.keyword(from: draft) else { return }
-        Task { await controller.update { $0.rules.append(Rule(name: keyword, terms: [keyword])) } }
+        let rule = Rule(name: keyword, terms: [keyword])
         setAddingKeyword(false)
-        lastAdded = keyword
+        Task {
+            if await controller.addRule(rule) {
+                lastAdded = keyword
+            } else {
+                isShowingRuleLimit = true
+            }
+        }
     }
 
     /// The keyword typed in `text`: trimmed, with runs of spaces made single; `nil` when there is none.

@@ -12,11 +12,20 @@ struct RuleEditorView: View {
     @Environment(ListeningController.self) private var controller
     @Environment(\.settingsNavigation) private var navigation
     @Environment(\.matchTesterSeed) private var testerSeed
+    @Environment(\.proUpsell) private var upsell
     @FocusState private var isWordsFocused: Bool
 
     var body: some View {
         if let rule = controller.configuration.rules.first(where: { $0.id == ruleID }) {
             Form {
+                if controller.proPolicy.heldBackRuleIDs(in: controller.configuration.rules).contains(rule.id) {
+                    Section {
+                        NoticeRow(systemImage: "lock.fill", tint: .accentColor, message: ProCopy.ruleHeldBack) {
+                            Button(ProCopy.unlockTitle) { upsell.show(.ruleLimit) }
+                                .accessibilityLabel("Unlock Pro for more rules")
+                        }
+                    }
+                }
                 ruleSection(rule)
 
                 Section {
@@ -98,35 +107,49 @@ struct RuleEditorView: View {
 
     private func channelRow(_ kind: ChannelKind, in rule: Rule) -> some View {
         let isConfigured = controller.configuration.channels.isConfigured(kind)
-        return HStack(spacing: 8) {
-            Toggle(
-                kind.displayName,
-                isOn: Binding(
-                    get: { rule.channels.contains(kind) },
-                    set: { isOn in
-                        controller.edit(rule: ruleID) {
-                            if isOn { $0.channels.insert(kind) } else { $0.channels.remove(kind) }
-                        }
-                    })
-            )
-            .toggleStyle(.checkbox)
-            .disabled(Self.isChannelDisabled(isConfigured: isConfigured, isChecked: rule.channels.contains(kind)))
-            .accessibilityLabel("Alert with \(kind.displayName)")
-            Spacer(minLength: 8)
-            if !isConfigured {
-                Button("Set up in Alerts") { navigation.show(.alerts) }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.tint)
-                    .font(.callout)
-                    .accessibilityLabel("Set up \(kind.displayName) in Alerts")
+        let isChecked = rule.channels.contains(kind)
+        let needsPro = !controller.proPolicy.allows(kind)
+        return VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 8) {
+                Toggle(
+                    kind.displayName,
+                    isOn: Binding(
+                        get: { isChecked },
+                        set: { isOn in
+                            controller.edit(rule: ruleID) {
+                                if isOn { $0.channels.insert(kind) } else { $0.channels.remove(kind) }
+                            }
+                        })
+                )
+                .toggleStyle(.checkbox)
+                .disabled(Self.isChannelDisabled(isConfigured: isConfigured, isChecked: isChecked, needsPro: needsPro))
+                .accessibilityLabel("Alert with \(kind.displayName)")
+                if needsPro { ProBadge { upsell.show(.channel(kind)) } }
+                Spacer(minLength: 8)
+                if needsPro {
+                    Button(ProCopy.unlockTitle) { upsell.show(.channel(kind)) }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.tint)
+                        .font(.callout)
+                        .accessibilityLabel("Unlock Pro for \(kind.displayName)")
+                } else if !isConfigured {
+                    Button("Set up in Alerts") { navigation.show(.alerts) }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.tint)
+                        .font(.callout)
+                        .accessibilityLabel("Set up \(kind.displayName) in Alerts")
+                }
+            }
+            if needsPro, isChecked {
+                SettingsCaption(ProCopy.channelNotSentOnFree)
             }
         }
     }
 
-    /// Whether a channel's checkbox is unavailable: a channel that is not set up cannot be turned on, but one that is on
-    /// and has stopped being set up (its address was cleared) can always be turned off.
-    static func isChannelDisabled(isConfigured: Bool, isChecked: Bool) -> Bool {
-        !isConfigured && !isChecked
+    /// Whether a channel's checkbox is unavailable: one that is not set up, or that needs Pro on Free, cannot be turned
+    /// on; one that is on can always be turned off (its address was cleared, or Pro went away).
+    static func isChannelDisabled(isConfigured: Bool, isChecked: Bool, needsPro: Bool = false) -> Bool {
+        !isChecked && (needsPro || !isConfigured)
     }
 
     // MARK: Cooldown
