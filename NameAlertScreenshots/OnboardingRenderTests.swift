@@ -685,6 +685,11 @@ struct OnboardingLogicTests {
             == "macOS may ask you to re-approve this about once a month. Approve it to keep hearing calls.")
     }
 
+    @Test("Opening System Settings for Screen Recording asks macOS first, so that the app is in the pane's list")
+    func screenRecordingPaneAsksFirst() {
+        #expect(PermissionKind.allCases.filter(SystemSettingsLink.asksFirst) == [.screenRecording])
+    }
+
     @Test("The permission cards and the popover offer the same thing for the same permission")
     func cardsAndPopoverAgree() {
         for kind in PermissionKind.allCases {
