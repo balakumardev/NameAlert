@@ -71,6 +71,18 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.device.audio-input: true
         com.apple.security.network.client: true
+    preBuildScripts:
+      # An archive is what goes to the App Store, and only a build with APP_STORE_BUILD sells Pro
+      # (NameAlert/Store/StoreBuild.swift). Xcode's Product > Archive builds plain Release, which would ship with every
+      # feature free, so an archive (ACTION "install") without the flag stops here. Builds (DMG, CI, verify.sh) go on.
+      - name: Refuse an archive that would not sell Pro
+        basedOnDependencyAnalysis: false
+        shell: /bin/bash
+        script: |
+          if [[ "${ACTION:-}" == "install" && " ${SWIFT_ACTIVE_COMPILATION_CONDITIONS:-} " != *" APP_STORE_BUILD "* ]]; then
+            echo "error: This archive would not sell Pro: it was built without APP_STORE_BUILD. Archive with scripts/build_appstore.sh, which sets it and checks the result." >&2
+            exit 1
+          fi
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.balakumar.namealert
