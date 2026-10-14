@@ -21,7 +21,7 @@ struct PermissionCard: View {
 
     var body: some View {
         let title = Self.title(for: kind)
-        let pill = Self.pill(for: status, hasAsked: hasAsked)
+        let pill = Self.pill(for: kind, status: status, hasAsked: hasAsked)
         HStack(alignment: .center, spacing: 12) {
             Image(systemName: Self.symbol(for: kind))
                 .font(.system(size: 16, weight: .medium))
@@ -87,7 +87,7 @@ struct PermissionCard: View {
                 .fixedSize()
                 .accessibilityLabel("Relaunch \(AppInfo.displayName)")
         } else {
-            switch Self.action(for: status, hasAsked: hasAsked) {
+            switch Self.action(for: kind, status: status, hasAsked: hasAsked) {
             case .allow:
                 Button("Allow", action: allow)
                     .buttonStyle(.borderedProminent)
@@ -113,8 +113,8 @@ struct PermissionCard: View {
         case none
     }
 
-    static func action(for status: PermissionStatus, hasAsked: Bool) -> Action {
-        switch PermissionOffer(status: status, hasAsked: hasAsked) {
+    static func action(for kind: PermissionKind, status: PermissionStatus, hasAsked: Bool) -> Action {
+        switch PermissionOffer(kind: kind, status: status, hasAsked: hasAsked) {
         case .allow: .allow
         case .openSystemSettings: .openSettings
         case .none: .none
@@ -127,11 +127,12 @@ struct PermissionCard: View {
         let tone: Tone
     }
 
-    static func pill(for status: PermissionStatus, hasAsked: Bool) -> Pill {
-        switch status {
-        case .granted: Pill(text: "Allowed", tone: .good)
-        case .denied: Pill(text: "Not allowed", tone: .bad)
-        case .notDetermined: hasAsked ? Pill(text: "Not allowed", tone: .bad) : Pill(text: "Not asked yet", tone: .neutral)
+    /// "Not asked yet" while asking would show the system's prompt, "Not allowed" once only System Settings can change it.
+    static func pill(for kind: PermissionKind, status: PermissionStatus, hasAsked: Bool) -> Pill {
+        switch action(for: kind, status: status, hasAsked: hasAsked) {
+        case .none: Pill(text: "Allowed", tone: .good)
+        case .allow: Pill(text: "Not asked yet", tone: .neutral)
+        case .openSettings: Pill(text: "Not allowed", tone: .bad)
         }
     }
 

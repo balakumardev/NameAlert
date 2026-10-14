@@ -5,9 +5,10 @@ import Observation
 
 /// Which permissions NameAlert has already asked the system for, kept across launches.
 ///
-/// macOS never says whether Screen Recording was refused: after a request, "not allowed" can only mean "turn it on in
-/// System Settings". So a fix that offers to ask ("Allow…") offers it once for each permission, and from then on
-/// points to System Settings. Setup (the permission cards) and the menu bar popover share this.
+/// macOS never says whether Screen Recording was refused, and it does not ask again about notifications it asked about
+/// once: after a request, "not allowed" can only mean "turn it on in System Settings". So for those two a fix that offers
+/// to ask ("Allow…") offers it once, and from then on points to System Settings (`PermissionKind.promptsOnce`). Setup
+/// (the permission cards), Settings and the menu bar popover share this.
 @MainActor
 @Observable
 final class PermissionAsks {
@@ -61,13 +62,12 @@ enum PermissionOffer: Equatable, Sendable {
     /// Nothing: it is allowed.
     case none
 
-    init(status: PermissionStatus, hasAsked: Bool) {
+    /// `hasAsked` is whether the app asked the system for `kind` before, in this setup or an earlier run.
+    init(kind: PermissionKind, status: PermissionStatus, hasAsked: Bool) {
         switch status {
         case .granted: self = .none
         case .denied: self = .openSystemSettings
-        // macOS says nothing about a Screen Recording prompt that was answered "no": after one request, still not
-        // allowed means the user has to turn it on in System Settings.
-        case .notDetermined: self = hasAsked ? .openSystemSettings : .allow
+        case .notDetermined: self = hasAsked && kind.promptsOnce ? .openSystemSettings : .allow
         }
     }
 }
@@ -80,6 +80,17 @@ extension PermissionKind {
         case .screenRecording: "Screen Recording"
         case .speechRecognition: "Speech Recognition"
         case .notifications: "Notifications"
+        }
+    }
+
+    /// Whether the system shows its prompt only the first time the app asks. Screen Recording's request says nothing
+    /// about a "no", and a notifications request that was asked once is not asked again: after one request, "not
+    /// decided" means the user turns it on in System Settings. The microphone and speech recognition prompts come back
+    /// whenever macOS has no answer on record (it never had one, or it was reset with `tccutil`): asking shows them.
+    var promptsOnce: Bool {
+        switch self {
+        case .screenRecording, .notifications: true
+        case .microphone, .speechRecognition: false
         }
     }
 }

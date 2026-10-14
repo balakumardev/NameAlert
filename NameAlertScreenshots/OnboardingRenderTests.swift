@@ -644,16 +644,27 @@ struct OnboardingLogicTests {
 
     @Test("A permission card offers Allow, then System Settings, and says which")
     func permissionCards() {
-        #expect(PermissionCard.action(for: .notDetermined, hasAsked: false) == .allow)
-        #expect(PermissionCard.action(for: .notDetermined, hasAsked: true) == .openSettings)
-        #expect(PermissionCard.action(for: .denied, hasAsked: false) == .openSettings)
-        #expect(PermissionCard.action(for: .denied, hasAsked: true) == .openSettings)
-        #expect(PermissionCard.action(for: .granted, hasAsked: true) == .none)
-
-        #expect(PermissionCard.pill(for: .granted, hasAsked: false) == .init(text: "Allowed", tone: .good))
-        #expect(PermissionCard.pill(for: .denied, hasAsked: false) == .init(text: "Not allowed", tone: .bad))
-        #expect(PermissionCard.pill(for: .notDetermined, hasAsked: true) == .init(text: "Not allowed", tone: .bad))
-        #expect(PermissionCard.pill(for: .notDetermined, hasAsked: false) == .init(text: "Not asked yet", tone: .neutral))
+        for kind in PermissionKind.allCases {
+            #expect(PermissionCard.action(for: kind, status: .notDetermined, hasAsked: false) == .allow)
+            #expect(PermissionCard.action(for: kind, status: .denied, hasAsked: false) == .openSettings)
+            #expect(PermissionCard.action(for: kind, status: .denied, hasAsked: true) == .openSettings)
+            #expect(PermissionCard.action(for: kind, status: .granted, hasAsked: true) == .none)
+            #expect(PermissionCard.pill(for: kind, status: .granted, hasAsked: false) == .init(text: "Allowed", tone: .good))
+            #expect(PermissionCard.pill(for: kind, status: .denied, hasAsked: false) == .init(text: "Not allowed", tone: .bad))
+            #expect(PermissionCard.pill(for: kind, status: .notDetermined, hasAsked: false)
+                == .init(text: "Not asked yet", tone: .neutral))
+        }
+        // Asked before and still not decided: Screen Recording and notifications are not asked again, so System
+        // Settings; the microphone and speech recognition are, once macOS has no answer on record (a tccutil reset).
+        #expect(PermissionCard.action(for: .screenRecording, status: .notDetermined, hasAsked: true) == .openSettings)
+        #expect(PermissionCard.pill(for: .screenRecording, status: .notDetermined, hasAsked: true)
+            == .init(text: "Not allowed", tone: .bad))
+        #expect(PermissionCard.action(for: .notifications, status: .notDetermined, hasAsked: true) == .openSettings)
+        #expect(PermissionCard.action(for: .microphone, status: .notDetermined, hasAsked: true) == .allow)
+        #expect(PermissionCard.pill(for: .microphone, status: .notDetermined, hasAsked: true)
+            == .init(text: "Not asked yet", tone: .neutral))
+        #expect(PermissionCard.action(for: .speechRecognition, status: .notDetermined, hasAsked: true) == .allow)
+        #expect(PermissionKind.allCases.filter(\.promptsOnce) == [.screenRecording, .notifications])
     }
 
     @Test("Every permission has a name, a reason that names the app, and a symbol that exists")
@@ -676,14 +687,16 @@ struct OnboardingLogicTests {
 
     @Test("The permission cards and the popover offer the same thing for the same permission")
     func cardsAndPopoverAgree() {
-        for status in [PermissionStatus.granted, .denied, .notDetermined] {
-            for hasAsked in [false, true] {
-                let card = PermissionCard.action(for: status, hasAsked: hasAsked)
-                let offer = PermissionOffer(status: status, hasAsked: hasAsked)
-                switch offer {
-                case .allow: #expect(card == .allow)
-                case .openSystemSettings: #expect(card == .openSettings)
-                case .none: #expect(card == .none)
+        for kind in PermissionKind.allCases {
+            for status in [PermissionStatus.granted, .denied, .notDetermined] {
+                for hasAsked in [false, true] {
+                    let card = PermissionCard.action(for: kind, status: status, hasAsked: hasAsked)
+                    let offer = PermissionOffer(kind: kind, status: status, hasAsked: hasAsked)
+                    switch offer {
+                    case .allow: #expect(card == .allow)
+                    case .openSystemSettings: #expect(card == .openSettings)
+                    case .none: #expect(card == .none)
+                    }
                 }
             }
         }

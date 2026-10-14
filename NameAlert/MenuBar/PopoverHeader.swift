@@ -214,7 +214,7 @@ enum IssueFix: Equatable {
                 self = .openSystemSettings(permission)
                 break
             }
-            switch PermissionOffer(status: status, hasAsked: hasAsked(permission)) {
+            switch PermissionOffer(kind: permission, status: status, hasAsked: hasAsked(permission)) {
             case .allow: self = .allow(permission)
             case .openSystemSettings: self = .openSystemSettings(permission)
             // Allowed by now (the problem is about to clear): trying again is the one thing left to do.
@@ -299,7 +299,8 @@ struct NotificationsOffNotice: View {
     @Environment(ListeningController.self) private var controller
 
     var body: some View {
-        let offer = PermissionOffer(status: controller.permissions.notifications, hasAsked: asks.hasAsked(.notifications))
+        let offer = PermissionOffer(
+            kind: .notifications, status: controller.permissions.notifications, hasAsked: asks.hasAsked(.notifications))
         NoticeRow(systemImage: "bell.slash.fill", tint: .orange, message: Self.message) {
             Button(Self.title(for: offer)) { perform(offer) }
                 .buttonStyle(.borderedProminent)

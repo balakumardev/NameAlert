@@ -280,7 +280,7 @@ struct NotificationPermissionRow: View {
 
     /// What the button offers: the system's question until it has been asked, then System Settings.
     static func offer(for status: PermissionStatus, asks: PermissionAsks) -> PermissionOffer {
-        PermissionOffer(status: status, hasAsked: asks.hasAsked(.notifications))
+        PermissionOffer(kind: .notifications, status: status, hasAsked: asks.hasAsked(.notifications))
     }
 }
 

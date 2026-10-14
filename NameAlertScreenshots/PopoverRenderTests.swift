@@ -258,7 +258,7 @@ struct PopoverLogicTests {
         #expect(!PopoverHeader.togglePauses(.error(.modelMissing)))
     }
 
-    @Test("A permission that was not asked for yet is asked for; after that, or once refused, System Settings is the way")
+    @Test("A permission that was not asked for yet is asked for; Screen Recording once asked, or any once refused, goes to System Settings")
     func permissionFixes() {
         let neverAsked = PermissionsSnapshot(
             microphone: .notDetermined, screenRecording: .notDetermined, speechRecognition: .notDetermined,
@@ -269,11 +269,19 @@ struct PopoverLogicTests {
                 IssueFix(
                     issue: .permissionDenied(permission), enginePreference: .automatic, permissions: neverAsked,
                     hasAsked: notYet) == .allow(permission))
-            // Asked for already: the system will not ask again.
+        }
+        // Asked for already: macOS will not ask about Screen Recording again.
+        #expect(
+            IssueFix(
+                issue: .permissionDenied(.screenRecording), enginePreference: .automatic, permissions: neverAsked,
+                hasAsked: { $0 == .screenRecording }) == .openSystemSettings(.screenRecording))
+        // It does ask again about the microphone and speech recognition when it has no answer on record (after a
+        // tccutil reset), so those are asked for again.
+        for permission in [PermissionKind.microphone, .speechRecognition] {
             #expect(
                 IssueFix(
                     issue: .permissionDenied(permission), enginePreference: .automatic, permissions: neverAsked,
-                    hasAsked: { $0 == permission }) == .openSystemSettings(permission))
+                    hasAsked: { $0 == permission }) == .allow(permission))
         }
         // Only the one that was asked for is changed: the others are still asked for.
         #expect(
