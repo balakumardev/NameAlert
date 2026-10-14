@@ -3,7 +3,7 @@ import NameAlertAlerts
 import NameAlertCore
 import UserNotifications
 
-/// Launch, `namealert://` links, sleep and wake, quitting, and the hit notifications' buttons.
+/// Launch, `takeheed://` links, sleep and wake, quitting, and the hit notifications' buttons.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     /// How long quitting waits for listening to stop and the settings and history to be written.

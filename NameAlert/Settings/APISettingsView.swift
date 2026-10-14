@@ -145,16 +145,16 @@ enum APIReference {
         let summary: String
     }
 
-    /// Every `namealert://` link, in the order the pane lists them. `URLRoute(url:)` reads each one.
+    /// Every `takeheed://` link, in the order the pane lists them. `URLRoute(url:)` reads each one.
     static let routes: [Route] = [
-        Route(url: "namealert://start", summary: "Start listening."),
-        Route(url: "namealert://pause", summary: "Pause listening."),
-        Route(url: "namealert://toggle", summary: "Start if paused, pause if listening."),
-        Route(url: "namealert://resume", summary: "End a snooze and listen again."),
-        Route(url: "namealert://snooze?minutes=30", summary: "Snooze alerts. Minutes: 1 to 1440, 30 if left out."),
-        Route(url: "namealert://open/settings", summary: "Open Settings."),
-        Route(url: "namealert://open/history", summary: "Open History."),
-        Route(url: "namealert://open/live", summary: "Open the live transcript."),
+        Route(url: "takeheed://start", summary: "Start listening."),
+        Route(url: "takeheed://pause", summary: "Pause listening."),
+        Route(url: "takeheed://toggle", summary: "Start if paused, pause if listening."),
+        Route(url: "takeheed://resume", summary: "End a snooze and listen again."),
+        Route(url: "takeheed://snooze?minutes=30", summary: "Snooze alerts. Minutes: 1 to 1440, 30 if left out."),
+        Route(url: "takeheed://open/settings", summary: "Open Settings."),
+        Route(url: "takeheed://open/history", summary: "Open History."),
+        Route(url: "takeheed://open/live", summary: "Open the live transcript."),
     ]
 
     /// The actions in the Shortcuts app.

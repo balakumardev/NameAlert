@@ -55,7 +55,7 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: dev.balakumar.namealert
             CFBundleURLSchemes:
-              - namealert
+              - takeheed
         NSMicrophoneUsageDescription: "Takeheed listens to your microphone on this Mac to notice when someone says your name."
         NSSpeechRecognitionUsageDescription: "Takeheed turns speech into text on this Mac so it can spot your name and keywords."
         NSScreenCaptureUsageDescription: "Takeheed listens to audio from calls and videos on this Mac to notice when someone says your name."
@@ -115,7 +115,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.balakumar.namealert.screenshots-host
         GENERATE_INFOPLIST_FILE: YES
         # Explicitly none: XcodeGen would otherwise pick up NameAlert/Info.plist from the sources, and the host would
-        # claim the namealert:// scheme and take the app's links.
+        # claim the takeheed:// scheme and take the app's links.
         INFOPLIST_FILE: ""
         INFOPLIST_KEY_LSUIElement: YES
         INFOPLIST_KEY_CFBundleDisplayName: *displayName

@@ -22,7 +22,7 @@ Speech transcription runs on your Mac, and your audio never leaves it. Takeheed 
 - **Searchable history**: Review past mentions locally on your Mac, or turn off history recording entirely.
 - **Live transcript window**: View speech recognition output in real time.
 - **Shortcuts and Siri**: Actions to start, pause, toggle, snooze, add keywords, and view recent mentions.
-- **URL scheme**: Control the app using `namealert://` commands: `start`, `pause`, `toggle`, `resume`, `snooze?minutes=30`, `open/settings`, `open/history`, and `open/live`.
+- **URL scheme**: Control the app using `takeheed://` commands: `start`, `pause`, `toggle`, `resume`, `snooze?minutes=30`, `open/settings`, `open/history`, and `open/live`.
 
 ## Requirements
 

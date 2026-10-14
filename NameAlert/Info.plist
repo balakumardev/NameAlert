@@ -27,7 +27,7 @@
 			<string>dev.balakumar.namealert</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>namealert</string>
+				<string>takeheed</string>
 			</array>
 		</dict>
 	</array>

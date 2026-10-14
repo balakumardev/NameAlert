@@ -1,7 +1,7 @@
 import Observation
 
 /// Opens the app's windows on behalf of code that cannot open them itself: the app delegate (setup at launch),
-/// `namealert://open/…` links, notification actions, and the menu bar popover.
+/// `takeheed://open/…` links, notification actions, and the menu bar popover.
 ///
 /// `open(_:)` only records the request. `StatusIcon`, which lives as long as the app does, watches `pending`, brings
 /// the app forward, opens the window with SwiftUI's `openWindow` or `openSettings`, and takes the request.

@@ -72,7 +72,7 @@ struct SnoozeAlertsIntent: AppIntent {
     static let description = IntentDescription("Pause for a while, then listen again.")
     static let openAppWhenRun = false
 
-    /// The same range as the `namealert://snooze` link.
+    /// The same range as the `takeheed://snooze` link.
     private static let minutesRange = 1...1440
 
     static var parameterSummary: some ParameterSummary {

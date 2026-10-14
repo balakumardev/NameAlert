@@ -505,7 +505,7 @@ struct HistoryApiAboutLogicTests {
         let expected: Set<String> = ["start", "pause", "toggle", "resume", "snooze", "openSettings", "openHistory", "openLive"]
         #expect(kinds == expected)
         // The example snooze link uses the default length, so it reads back as that.
-        #expect(URLRoute(url: URL(string: "namealert://snooze?minutes=30")!) == .snooze(minutes: 30))
+        #expect(URLRoute(url: URL(string: "takeheed://snooze?minutes=30")!) == .snooze(minutes: 30))
     }
 
     @Test("The Shortcuts actions are the eight the spec lists")

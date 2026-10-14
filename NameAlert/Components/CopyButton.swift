@@ -14,7 +14,7 @@ enum Pasteboard {
 struct CopyButton: View {
     /// What the button puts on the pasteboard.
     let text: String
-    /// What it copies, in words, for the tooltip and VoiceOver: "namealert://start".
+    /// What it copies, in words, for the tooltip and VoiceOver: "takeheed://start".
     let what: String
 
     /// How long the check mark stays.

@@ -6,7 +6,7 @@ import SwiftUI
 import UserNotifications
 
 /// The composition root: the one listening controller, window router and secrets model every scene shares, and the
-/// app-level commands (launch, `namealert://` links, notification actions, opening the app again).
+/// app-level commands (launch, `takeheed://` links, notification actions, opening the app again).
 @MainActor
 final class AppEnvironment {
     static let shared: AppEnvironment = {
@@ -75,7 +75,7 @@ final class AppEnvironment {
     ///
     /// Every command that reaches the controller waits for this first. A link or a notification button can be what
     /// opens the app, and it must be carried out after the start-up, not before it: otherwise "start listening when
-    /// the app opens" would run second and undo a `namealert://pause` that launched the app.
+    /// the app opens" would run second and undo a `takeheed://pause` that launched the app.
     func ensureStartedUp() async {
         if startUp == nil {
             startUp = Task {
@@ -86,7 +86,7 @@ final class AppEnvironment {
         await startUp?.value
     }
 
-    /// Carries out a `namealert://` link. None of them deletes or changes what the user has set up.
+    /// Carries out a `takeheed://` link. None of them deletes or changes what the user has set up.
     func perform(_ route: URLRoute) {
         Task { await carryOut(route) }
     }
