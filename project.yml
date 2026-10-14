@@ -41,10 +41,10 @@ targets:
       path: NameAlert/Info.plist
       properties:
         LSUIElement: true
-        CFBundleName: NameAlert
+        CFBundleName: Takeheed
         # The name people see; the app reads it through AppInfo.displayName, so renaming the app is this one value
         # (the screenshot host below reuses it through the anchor).
-        CFBundleDisplayName: &displayName NameAlert
+        CFBundleDisplayName: &displayName Takeheed
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         CFBundleIconName: AppIcon
@@ -56,11 +56,11 @@ targets:
           - CFBundleURLName: dev.balakumar.namealert
             CFBundleURLSchemes:
               - namealert
-        NSMicrophoneUsageDescription: "NameAlert listens to your microphone on this Mac to notice when someone says your name."
-        NSSpeechRecognitionUsageDescription: "NameAlert turns speech into text on this Mac so it can spot your name and keywords."
-        NSScreenCaptureUsageDescription: "NameAlert listens to audio from calls and videos on this Mac to notice when someone says your name."
+        NSMicrophoneUsageDescription: "Takeheed listens to your microphone on this Mac to notice when someone says your name."
+        NSSpeechRecognitionUsageDescription: "Takeheed turns speech into text on this Mac so it can spot your name and keywords."
+        NSScreenCaptureUsageDescription: "Takeheed listens to audio from calls and videos on this Mac to notice when someone says your name."
         # Shown when an alert goes to a server on the user's own network (a self-hosted ntfy or webhook).
-        NSLocalNetworkUsageDescription: "NameAlert sends alerts to a server on your local network, like a self-hosted ntfy or webhook, when you set one up."
+        NSLocalNetworkUsageDescription: "Takeheed sends alerts to a server on your local network, like a self-hosted ntfy or webhook, when you set one up."
         # Plain http is accepted only for alert servers on the user's own network (ChannelSettings.isLocalNetworkHost);
         # this is what lets those requests through App Transport Security. Everything else must be https.
         NSAppTransportSecurity:

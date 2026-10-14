@@ -176,7 +176,7 @@ enum ScreenshotPictures {
     private static func configureAlertChannels(_ configuration: inout AppConfiguration) {
         configuration.channels.ntfy.topic = "bala-alerts-7f3k"
         configuration.channels.telegramCall.user = "@bala"
-        configuration.channels.webhook.url = "https://hooks.example.com/namealert"
+        configuration.channels.webhook.url = "https://hooks.example.com/takeheed"
     }
 
     /// The Settings window with `section` open, `size` points of it, or only the top `visibleHeight` points when that is

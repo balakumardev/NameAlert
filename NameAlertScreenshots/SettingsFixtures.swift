@@ -26,7 +26,7 @@ enum SettingsFixtures {
         var configuration = DemoFixtures.settingsConfiguration
         configuration.channels.ntfy.topic = "bala-alerts-7f3k"
         configuration.channels.telegramCall.user = "@balakumar"
-        configuration.channels.webhook.url = "http://hooks.example.com/namealert"
+        configuration.channels.webhook.url = "http://hooks.example.com/takeheed"
         configuration.channels.webhook.headerNames = ["X-Api-Key", "X-Team"]
         return configuration
     }

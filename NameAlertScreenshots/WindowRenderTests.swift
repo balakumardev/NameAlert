@@ -614,7 +614,7 @@ struct HistoryApiAboutLogicTests {
 
     private func snapshot(_ configuration: AppConfiguration, log: [String] = ["a line"]) -> Diagnostics.Snapshot {
         Diagnostics.Snapshot(
-            appName: "NameAlert", version: "1.0.0", build: "42", macOS: "26.0.1", architecture: "arm64",
+            appName: "Takeheed", version: "1.0.0", build: "42", macOS: "26.0.1", architecture: "arm64",
             date: Date(timeIntervalSince1970: 1_760_175_000), state: "Listening · System audio",
             engine: "Apple Speech (on-device), en-US",
             permissions: PermissionsSnapshot(
@@ -629,7 +629,7 @@ struct HistoryApiAboutLogicTests {
         configuration.channels.webhook.url = "https://hooks.example.com/very-secret-path"
         configuration.channels.ntfy.topic = "my-private-topic"
         let text = Diagnostics.format(snapshot(configuration))
-        #expect(text.hasPrefix("NameAlert 1.0.0 (42)\nmacOS 26.0.1, arm64\nDate: 2025-10-11T"))
+        #expect(text.hasPrefix("Takeheed 1.0.0 (42)\nmacOS 26.0.1, arm64\nDate: 2025-10-11T"))
         #expect(text.contains("State: Listening · System audio"))
         #expect(text.contains("Speech engine: Apple Speech (on-device), en-US"))
         #expect(text.contains("Permissions: Microphone allowed, Screen Recording denied, Speech Recognition not decided, Notifications allowed"))
