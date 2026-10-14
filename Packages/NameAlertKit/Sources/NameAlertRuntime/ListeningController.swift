@@ -22,8 +22,8 @@ extension ListeningControllerError: LocalizedError {
 
 /// Listens, and alerts when a rule's words are heard. Everything the UI shows about listening is here.
 ///
-/// **Commands.** `bootstrap`, `start`, `pause`, `toggle`, `snooze`, `resume`, `update`, `completeOnboarding`,
-/// `systemWillSleep` and `systemDidWake` change what the controller does. They run one at a time, in the order they
+/// **Commands.** `bootstrap`, `start`, `pause`, `toggle`, `snooze`, `resume`, `update`, `addRule`, `setProAccess`,
+/// `completeOnboarding`, `systemWillSleep` and `systemDidWake` change what the controller does. They run one at a time, in the order they
 /// were called: each waits until the commands before it are over, so two can never interleave, and after any burst
 /// of them the state is the one the last command asked for. A command takes its place in the line before it first
 /// waits for anything, so calls made one after another on the main actor run in that order. Commands are short: what
@@ -68,6 +68,12 @@ public final class ListeningController {
     public private(set) var installedModels: Set<WhisperModel> = []
     /// When the newest hit that was sent on was heard.
     public private(set) var lastHitAt: Date?
+    /// Whether this copy has Pro. On Free the rules past the free limit and the alerts that leave the Mac are held back
+    /// (`ProPolicy`); nothing that is saved changes. The app sets it from the App Store (`setProAccess`).
+    public private(set) var proAccess: ProAccess
+
+    /// What Free or Pro allows now: what the settings show, and what alerts.
+    public var proPolicy: ProPolicy { ProPolicy(access: proAccess) }
 
     // MARK: Collaborators
 
@@ -121,8 +127,10 @@ public final class ListeningController {
     /// words still counts. Tests shorten it.
     @ObservationIgnored var transcriptDrainLimit: Duration = .seconds(2)
 
-    public init(dependencies: RuntimeDependencies) {
+    /// `proAccess` is what the app knows at launch. A build that does not sell Pro passes `.pro`.
+    public init(dependencies: RuntimeDependencies, proAccess: ProAccess = .pro) {
         self.dependencies = dependencies
+        self.proAccess = proAccess
         configuration = AppConfiguration()
         dispatcher = AlertDispatcher(channels: dependencies.channels, secrets: dependencies.secrets, now: dependencies.now)
     }
@@ -183,15 +191,34 @@ public final class ListeningController {
     /// the language restarts listening if it is on (or failed); a change to the rules reaches the running engine's
     /// hints without a restart; a change to the channels or the global cooldown reaches the alerts.
     public func update(_ mutate: (inout AppConfiguration) -> Void) async {
+        await command { await performUpdate(mutate) }
+    }
+
+    /// Adds `rule` at the end of the list, unless Free has its most rules already (`ProPolicy.canAddRule`): then nothing
+    /// changes and this returns `false`. The check is made in the command's turn, against the configuration as it is
+    /// then, so two quick adds cannot both pass it.
+    @discardableResult
+    public func addRule(_ rule: Rule) async -> Bool {
+        var added = false
         await command {
             await loadConfigurationIfNeeded()
-            let old = configuration
-            var new = old
-            mutate(&new)
-            guard new != old else { return }
-            configuration = new
-            await dependencies.configStore.save(new)
-            await apply(new, replacing: old)
+            guard proPolicy.canAddRule(to: configuration.rules) else { return }
+            await performUpdate { $0.rules.append(rule) }
+            added = true
+        }
+        return added
+    }
+
+    /// What this copy may do from now on. Going to Free holds back the rules past the free limit and the alerts that
+    /// leave the Mac; going to Pro brings them back. Nothing saved changes, and listening is not restarted: the rule
+    /// engine and the running engine's hints change in place.
+    public func setProAccess(_ access: ProAccess) async {
+        await command {
+            guard access != proAccess else { return }
+            proAccess = access
+            logger.info("Pro access is \(access.rawValue, privacy: .public)")
+            guard isConfigurationLoaded else { return }  // loading the configuration applies it
+            await applyAlertingRules()
         }
     }
 
@@ -243,8 +270,10 @@ public final class ListeningController {
 
     // MARK: - Other requests
 
-    /// Sends a sample hit to one channel, whatever the rules and cooldowns say. Throws what the delivery threw.
+    /// Sends a sample hit to one channel, whatever the rules and cooldowns say. Throws what the delivery threw, or
+    /// `ProFeatureError.needsPro` for an alert that Free does not send.
     public func testAlert(_ kind: ChannelKind) async throws {
+        guard proPolicy.allows(kind) else { throw ProFeatureError.needsPro(kind) }
         let rule = configuration.rules.first
         let term =
             rule?.terms.lazy.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty }
@@ -332,6 +361,18 @@ public final class ListeningController {
         await body()
     }
 
+    /// Changes the configuration, saves it and applies the change. Runs inside a command.
+    private func performUpdate(_ mutate: (inout AppConfiguration) -> Void) async {
+        await loadConfigurationIfNeeded()
+        let old = configuration
+        var new = old
+        mutate(&new)
+        guard new != old else { return }
+        configuration = new
+        await dependencies.configStore.save(new)
+        await apply(new, replacing: old)
+    }
+
     /// Starts a listening session, unless listening is under way.
     private func performStart() async {
         resumesAfterWake = false
@@ -381,10 +422,7 @@ public final class ListeningController {
     }
 
     private func apply(_ new: AppConfiguration, replacing old: AppConfiguration) async {
-        if new.rules != old.rules {
-            ruleEngine.updateRules(new.rules)
-            if let engine = currentEngine { await engine.updateHints(RuleEngine.hints(for: new.rules)) }
-        }
+        if new.rules != old.rules { await applyAlertingRules() }
         if new.channels != old.channels || new.globalCooldownSeconds != old.globalCooldownSeconds {
             await dispatcher.configure(settings: new.channels, globalCooldownSeconds: new.globalCooldownSeconds)
         }
@@ -405,6 +443,16 @@ public final class ListeningController {
         }
     }
 
+    /// The rules as they alert now: the saved rules under `proPolicy`.
+    private var alertingRules: [Rule] { proPolicy.alertingRules(configuration.rules) }
+
+    /// Gives the rule engine, and the running engine's hints, the rules as they alert now.
+    private func applyAlertingRules() async {
+        let rules = alertingRules
+        ruleEngine.updateRules(rules)
+        if let engine = currentEngine { await engine.updateHints(RuleEngine.hints(for: rules)) }
+    }
+
     private func flushStores() async {
         await dependencies.configStore.flush()
         await dependencies.historyStore.flush()
@@ -415,7 +463,7 @@ public final class ListeningController {
         isConfigurationLoaded = true
         let loaded = await dependencies.configStore.load()
         configuration = loaded
-        ruleEngine.updateRules(loaded.rules)
+        ruleEngine.updateRules(proPolicy.alertingRules(loaded.rules))
         await dispatcher.configure(settings: loaded.channels, globalCooldownSeconds: loaded.globalCooldownSeconds)
     }
 
@@ -747,7 +795,7 @@ public final class ListeningController {
     private func prepare(_ engine: any SpeechEngine, for plan: ListeningPlan) async -> AttemptEnd? {
         let phase = beginProgressPhase()
         defer { endProgressPhase(phase) }
-        let hints = RuleEngine.hints(for: configuration.rules)
+        let hints = RuleEngine.hints(for: alertingRules)
         let locale = plan.localeIdentifier
         let report: @Sendable (PreparationProgress) -> Void = { progress in
             Task { @MainActor in
@@ -962,7 +1010,8 @@ public final class ListeningController {
     /// when the last hit was heard, the history) and its deliveries start in a task of their own. Neither the pipeline
     /// nor a pause waits for or stops the deliveries: the hit was heard before that.
     private func send(_ hit: Hit) async {
-        guard let rule = configuration.rules.first(where: { $0.id == hit.ruleID }) else { return }
+        // The rule as it alerts: on Free without the channels that leave the Mac.
+        guard let rule = alertingRules.first(where: { $0.id == hit.ruleID }) else { return }
         guard await dispatcher.admit(hit, rule: rule) else { return }  // held back by the global cooldown
         // Admitted: from here on, it is recorded and delivered exactly once, whatever happens meanwhile.
         await record(hit)
@@ -1025,7 +1074,7 @@ public final class ListeningController {
         isConfigurationLoaded = true
         isBootstrapped = true
         self.configuration = configuration
-        ruleEngine.updateRules(configuration.rules)
+        ruleEngine.updateRules(proPolicy.alertingRules(configuration.rules))
         self.state = state
         self.recentHits = recentHits
         self.liveTranscript = liveTranscript

@@ -71,7 +71,7 @@ private final class Harness {
         sleeper: TestSleeper = TestSleeper(), permissions: PermissionsSnapshot = .allGranted,
         capture: FakeCapture = FakeCapture(), speech: FakeSpeech = FakeSpeech(), models: FakeModels = FakeModels(),
         channel: FakeChannel = FakeChannel(.sound), callDetectionSupported: Bool = true,
-        captureCallLimit: Duration? = nil
+        captureCallLimit: Duration? = nil, proAccess: ProAccess = .pro
     ) throws {
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("NameAlertRuntimeTests-\(UUID().uuidString)", isDirectory: true)
@@ -102,7 +102,7 @@ private final class Harness {
             now: { clock.now },
             sleep: { try await sleeper.sleep($0) },
             backoffBase: .milliseconds(1))
-        controller = ListeningController(dependencies: dependencies)
+        controller = ListeningController(dependencies: dependencies, proAccess: proAccess)
         if let captureCallLimit { controller.captureCallLimit = captureCallLimit }
     }
 
@@ -975,5 +975,143 @@ struct ListeningControllerTranscriptTests {
     @Test func excerptIsNilWhenNothingWasHeard() {
         let memory = TranscriptMemory()
         #expect(memory.excerpt(endingWith: "  ", at: start) == nil)
+    }
+}
+
+// MARK: - Pro
+
+private let alpha = Rule(name: "Alpha", terms: ["Alpha"], channels: [.sound])
+private let bravo = Rule(name: "Bravo", terms: ["Bravo"], channels: [.sound])
+private let charlie = Rule(name: "Charlie", terms: ["Charlie"], channels: [.sound])
+private let delta = Rule(name: "Delta", terms: ["Delta"], channels: [.sound])
+
+/// The engine hears "hey Delta", the fourth rule's word, on the first chunk.
+private func heyDelta() -> FakeSpeech {
+    FakeSpeech([.init([final("s1", "hey Delta")])])
+}
+
+@MainActor
+@Suite("ListeningController Pro access", .timeLimit(.minutes(1)))
+struct ListeningControllerProTests {
+    private static var fourRules: AppConfiguration { .test(rules: [alpha, bravo, charlie, delta]) }
+
+    /// `fourRules`, with the first rule also alerting through ntfy, which has a topic.
+    private static var fourRulesWithNtfy: AppConfiguration {
+        var configuration = fourRules
+        configuration.rules[0].channels = [.sound, .ntfy]
+        configuration.channels.ntfy.topic = "alerts"
+        return configuration
+    }
+
+    @Test func freeHoldsBackTheFourthRule() async throws {
+        let h = try Harness(configuration: Self.fourRules, speech: heyDelta(), proAccess: .free)
+        #expect(await h.startListening())
+        await settle()
+        #expect(h.channel.hits.isEmpty)
+        #expect(await h.controller.history().isEmpty, "a held-back rule adds nothing to History")
+        #expect(h.speech.preparedHints == [["Alpha", "Bravo", "Charlie"]])
+        await h.finish()
+    }
+
+    @Test func proAlertsWithEveryRule() async throws {
+        let h = try Harness(configuration: Self.fourRules, speech: heyDelta(), proAccess: .pro)
+        #expect(await h.startListening())
+        #expect(await eventually { h.channel.hits.count == 1 })
+        #expect(h.channel.hits.first?.ruleName == "Delta")
+        #expect(h.speech.preparedHints == [["Alpha", "Bravo", "Charlie", "Delta"]])
+        await h.finish()
+    }
+
+    @Test func buyingProReachesTheRunningEngineWithoutARestart() async throws {
+        let h = try Harness(configuration: Self.fourRules, proAccess: .free)
+        #expect(await h.startListening())
+        await h.controller.setProAccess(.pro)
+        #expect(h.controller.proAccess == .pro)
+        #expect(h.controller.proPolicy.isPro)
+        #expect(h.speech.hintUpdates.last == ["Alpha", "Bravo", "Charlie", "Delta"])
+        #expect(h.capture.startCount == 1, "listening was not restarted")
+        await h.finish()
+    }
+
+    @Test func losingProHoldsBackAndKeepsEverythingSaved() async throws {
+        let configuration = Self.fourRulesWithNtfy
+        let h = try Harness(configuration: configuration, proAccess: .pro)
+        #expect(await h.startListening())
+        await h.controller.setProAccess(.free)
+        #expect(h.speech.hintUpdates.last == ["Alpha", "Bravo", "Charlie"])
+        #expect(h.capture.startCount == 1)
+        #expect(h.controller.configuration.rules == configuration.rules, "nothing the user set up changes")
+        #expect(h.controller.configuration.channels == configuration.channels)
+        await h.finish()
+    }
+
+    @Test func freeSendsNoAlertThatLeavesTheMacButStillRecordsTheHit() async throws {
+        var configuration = AppConfiguration.test(rules: [Rule(name: "My name", terms: ["Bala"], channels: [.sound, .ntfy])])
+        configuration.channels.ntfy.topic = "alerts"
+        let h = try Harness(configuration: configuration, speech: heyBala(), channel: FakeChannel(.ntfy), proAccess: .free)
+        #expect(await h.startListening())
+        #expect(await eventually { await h.controller.history().count == 1 })
+        await settle()
+        #expect(h.channel.hits.isEmpty, "ntfy is part of Pro")
+        await h.finish()
+    }
+
+    @Test func proSendsTheAlertsThatLeaveTheMac() async throws {
+        var configuration = AppConfiguration.test(rules: [Rule(name: "My name", terms: ["Bala"], channels: [.sound, .ntfy])])
+        configuration.channels.ntfy.topic = "alerts"
+        let h = try Harness(configuration: configuration, speech: heyBala(), channel: FakeChannel(.ntfy), proAccess: .pro)
+        #expect(await h.startListening())
+        #expect(await eventually { h.channel.hits.count == 1 })
+        await h.finish()
+    }
+
+    @Test func aTestOfAnAlertThatLeavesTheMacNeedsPro() async throws {
+        var configuration = AppConfiguration.test()
+        configuration.channels.ntfy.topic = "alerts"
+        let h = try Harness(configuration: configuration, channel: FakeChannel(.ntfy), proAccess: .free)
+        await h.controller.bootstrap()
+        await #expect(throws: ProFeatureError.needsPro(.ntfy)) {
+            try await h.controller.testAlert(.ntfy)
+        }
+        #expect(h.channel.hits.isEmpty)
+        await h.controller.setProAccess(.pro)
+        try await h.controller.testAlert(.ntfy)
+        #expect(h.channel.hits.count == 1)
+        await h.finish()
+    }
+
+    @Test func freeAddsRulesUpToTheLimitOnly() async throws {
+        let h = try Harness(configuration: .test(rules: [alpha, bravo]), proAccess: .free)
+        await h.controller.bootstrap()
+        #expect(await h.controller.addRule(charlie))
+        let addedPastTheLimit = await h.controller.addRule(delta)
+        #expect(!addedPastTheLimit)
+        #expect(h.controller.configuration.rules.map(\.name) == ["Alpha", "Bravo", "Charlie"])
+        await h.controller.setProAccess(.pro)
+        #expect(await h.controller.addRule(delta))
+        #expect(h.controller.configuration.rules.count == 4)
+        await h.controller.systemWillSleep()  // writes the configuration now
+        #expect(try h.configurationOnDisk().rules.count == 4)
+        await h.finish()
+    }
+
+    @Test func twoQuickAddsAtTheLimitAddOneRule() async throws {
+        let h = try Harness(configuration: .test(rules: [alpha, bravo]), proAccess: .free)
+        await h.controller.bootstrap()
+        let controller = h.controller
+        let first = Task { await controller.addRule(charlie) }
+        let second = Task { await controller.addRule(delta) }
+        let results = [await first.value, await second.value]
+        #expect(results.filter { $0 }.count == 1)
+        #expect(controller.configuration.rules.count == 3)
+        await h.finish()
+    }
+
+    @Test func aDemoControllerCanShowFree() {
+        let controller = ListeningController.demo(
+            configuration: .test(rules: [alpha, bravo, charlie, delta]), state: .off, recentHits: [], liveTranscript: "",
+            level: 0, proAccess: .free)
+        #expect(controller.proAccess == .free)
+        #expect(controller.proPolicy.heldBackRuleIDs(in: controller.configuration.rules) == [delta.id])
     }
 }
