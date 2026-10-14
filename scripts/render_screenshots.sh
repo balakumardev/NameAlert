@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 #
-# Renders the five Mac App Store screenshots into appstore/screenshots/, as 2880 x 1800 PNGs (RGB, no alpha), from the
+# Renders the six Mac App Store screenshots into appstore/screenshots/, as 2880 x 1800 PNGs (RGB, no alpha), from the
 # app's real SwiftUI views filled with demo data.
 #
-#   scripts/render_screenshots.sh           all five
+#   scripts/render_screenshots.sh           all six
 #   scripts/render_screenshots.sh 01 05     only the files whose names start with 01 and with 05
+#   scripts/render_screenshots.sh --review  the App Review screenshot of the Pro purchase, into appstore/review-screenshots/
 #
 # Environment:
 #   SCREENSHOTS_OUT   the folder the finished PNGs go to (default: appstore/screenshots)
@@ -37,13 +38,27 @@ if ! command -v xcodegen >/dev/null 2>&1; then
     exit 1
 fi
 
-OUT="${SCREENSHOTS_OUT:-appstore/screenshots}"
+REVIEW=false
+prefixes=()
+for arg in "$@"; do
+    if [[ "$arg" == "--review" ]]; then
+        REVIEW=true
+    else
+        prefixes+=("$arg")
+    fi
+done
+
+DEFAULT_OUT="appstore/screenshots"
+if $REVIEW; then
+    DEFAULT_OUT="appstore/review-screenshots"
+fi
+OUT="${SCREENSHOTS_OUT:-$DEFAULT_OUT}"
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
 
 ONLY=""
-if [[ $# -gt 0 ]]; then
-    ONLY="$(IFS=,; echo "$*")"
+if [[ ${#prefixes[@]} -gt 0 ]]; then
+    ONLY="$(IFS=,; echo "${prefixes[*]}")"
 fi
 
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/namealert-screenshots.XXXXXX")"
@@ -56,12 +71,16 @@ LOG="$(mktemp "${TMPDIR:-/tmp}/namealert-screenshots-log.XXXXXX")"
 xcodegen generate --quiet
 
 # xcodebuild hands the variables that start with TEST_RUNNER_ to the test process, without the prefix.
-RUNNER_ENV=(
-    TEST_RUNNER_NAMEALERT_RENDER_SCREENSHOTS=1
-    "TEST_RUNNER_NAMEALERT_SCREENSHOTS_OUT=$STAGE"
-)
-if [[ -n "$ONLY" ]]; then
-    RUNNER_ENV+=("TEST_RUNNER_NAMEALERT_SCREENSHOTS_ONLY=$ONLY")
+SUITE=AppStoreScreenshotTests
+RUNNER_ENV=("TEST_RUNNER_NAMEALERT_SCREENSHOTS_OUT=$STAGE")
+if $REVIEW; then
+    SUITE=ReviewScreenshotTests
+    RUNNER_ENV+=(TEST_RUNNER_NAMEALERT_RENDER_REVIEW_SCREENSHOT=1)
+else
+    RUNNER_ENV+=(TEST_RUNNER_NAMEALERT_RENDER_SCREENSHOTS=1)
+    if [[ -n "$ONLY" ]]; then
+        RUNNER_ENV+=("TEST_RUNNER_NAMEALERT_SCREENSHOTS_ONLY=$ONLY")
+    fi
 fi
 
 # English and US formats, so that times read "10:32 AM" whatever this Mac is set to.
@@ -72,13 +91,17 @@ XCODEBUILD=(
     -destination 'platform=macOS'
     -testLanguage en
     -testRegion US
-    -only-testing:NameAlertScreenshots/AppStoreScreenshotTests
+    "-only-testing:NameAlertScreenshots/$SUITE"
 )
 if [[ -n "${DERIVED_DATA:-}" ]]; then
     XCODEBUILD+=(-derivedDataPath "$DERIVED_DATA")
 fi
 
-echo "Rendering ${ONLY:-all five screenshots} into $OUT"
+if $REVIEW; then
+    echo "Rendering the App Review screenshot of the Pro purchase into $OUT"
+else
+    echo "Rendering ${ONLY:-all six screenshots} into $OUT"
+fi
 status=0
 env "${RUNNER_ENV[@]}" "${XCODEBUILD[@]}" > "$LOG" 2>&1 || status=$?
 

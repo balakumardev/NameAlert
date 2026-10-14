@@ -42,16 +42,17 @@ struct ScreenshotSpec: Sendable {
 
     static let menuBar = ScreenshotSpec(name: "01-menu-bar", headline: "Know the moment someone says your name")
     static let rules = ScreenshotSpec(name: "02-rules", headline: "Choose what to listen for and how to be alerted")
-    static let alerts = ScreenshotSpec(name: "03-alerts", headline: "Sound, notification, alarm, push, call or webhook")
+    static let alerts = ScreenshotSpec(name: "03-alerts", headline: "Sound, notification, alarm or screen flash")
     static let onboarding = ScreenshotSpec(name: "04-onboarding", headline: "Set up in a minute")
     static let live = ScreenshotSpec(name: "05-live", headline: "Your audio never leaves your Mac")
+    static let pro = ScreenshotSpec(name: "06-pro", headline: "Pro: unlimited rules and alerts to your phone")
 
-    static let all: [ScreenshotSpec] = [menuBar, rules, alerts, onboarding, live]
+    static let all: [ScreenshotSpec] = [menuBar, rules, alerts, onboarding, live, pro]
 }
 
-// MARK: - The five screenshots
+// MARK: - The six screenshots
 
-/// Renders the five Mac App Store screenshots (2880 × 1800, RGB, no alpha) from the app's real views on demo data and
+/// Renders the six Mac App Store screenshots (2880 × 1800, RGB, no alpha) from the app's real views on demo data and
 /// writes them to `appstore/screenshots/`. Run it with `scripts/render_screenshots.sh`.
 @Suite("App Store screenshots", .serialized, .enabled(if: ScreenshotEnvironment.isRequested))
 @MainActor
@@ -79,6 +80,11 @@ struct AppStoreScreenshotTests {
     @Test("05 The live transcript")
     func live() async throws {
         try await produce(.live) { try await ScreenshotPictures.liveTranscript() }
+    }
+
+    @Test("06 Settings → Pro, owned")
+    func pro() async throws {
+        try await produce(.pro) { try await ScreenshotPictures.pro() }
     }
 
     private func produce(_ spec: ScreenshotSpec, picture: () async throws -> ScreenshotPicture) async throws {
@@ -135,29 +141,38 @@ enum ScreenshotPictures {
         ]
     }
 
-    /// Settings → Rules: ten rules, the first open, a sentence tried, and every way to be alerted ready to choose.
+    /// A store that sells Pro and shows `status`, for the Settings shots: the sidebar lists Pro as it does in the App
+    /// Store build. Nothing is read or bought.
+    private static func store(_ status: ProStore.Status) -> ProStore {
+        let store = ProStore(isEnforced: true, cache: nil)
+        store.present(status: status)
+        return store
+    }
+
+    /// Settings → Pro as an owner sees it: what Pro adds and that it is on. No price (store screenshots show none).
+    static func pro() async throws -> ScreenshotPicture {
+        let controller = DemoFixtures.controller(.off, configuration: DemoFixtures.settingsConfiguration)
+        return try await settings(
+            .pro, size: CGSize(width: 900, height: 540), controller: controller, store: store(.pro), seed: nil)
+    }
+
+    /// Settings → Rules as a new customer has it: the three rules Free alerts with, the first open with a sentence tried,
+    /// and the alerts that need Pro marked.
     static func rules() async throws -> ScreenshotPicture {
         var configuration = DemoFixtures.settingsConfiguration
         configuration.rules = [
             Rule(
                 name: "My name", terms: ["Bala", "Balakumar", "Bala Kumar"], sensitivity: .balanced,
-                channels: [.sound, .notification, .ntfy, .telegramCall], cooldownSeconds: 10),
+                channels: [.sound, .notification, .persistentAlarm], cooldownSeconds: 10),
             Rule(
                 name: "Standup", terms: ["standup", "stand-up"], sensitivity: .exact, channels: [.sound, .persistentAlarm],
                 cooldownSeconds: 45),
-            Rule(name: "Project Atlas", terms: ["Atlas"], channels: [.notification], cooldownSeconds: 120),
-            Rule(name: "Acme", terms: ["Acme", "Acme Corp"], channels: [.sound, .notification]),
-            Rule(name: "Deadline", terms: ["deadline", "due date"], channels: [.notification, .screenFlash]),
-            Rule(name: "Design review", terms: ["design review"], channels: [.notification], cooldownSeconds: 60),
-            Rule(name: "Retro", terms: ["retro", "retrospective"], channels: [.notification]),
-            Rule(name: "Budget", terms: ["budget"], channels: [.sound, .notification]),
-            Rule(name: "Launch", terms: ["launch", "launch day"], channels: [.notification, .ntfy]),
-            Rule(name: "Lunch", terms: ["lunch"], channels: [.notification], isEnabled: false),
+            Rule(name: "Project Atlas", terms: ["Atlas"], channels: [.notification, .screenFlash], cooldownSeconds: 120),
         ]
         configureAlertChannels(&configuration)
-        let controller = DemoFixtures.controller(.off, configuration: configuration)
+        let controller = DemoFixtures.controller(.off, configuration: configuration, proAccess: .free)
         return try await settings(
-            .rules, size: CGSize(width: 900, height: 750), controller: controller,
+            .rules, size: CGSize(width: 900, height: 750), controller: controller, store: store(.free),
             seed: "okay so before we wrap up, can Bala share the screen")
     }
 
@@ -170,7 +185,8 @@ enum ScreenshotPictures {
         // above the Screen flash heading, so no row is cut in half: Sound, Notification and Alarm, the first three of the
         // headline, as large as the canvas allows.
         return try await settings(
-            .alerts, size: CGSize(width: 900, height: 540), visibleHeight: 522, controller: controller, seed: nil)
+            .alerts, size: CGSize(width: 900, height: 540), visibleHeight: 522, controller: controller, store: store(.free),
+            seed: nil)
     }
 
     private static func configureAlertChannels(_ configuration: inout AppConfiguration) {
@@ -182,9 +198,9 @@ enum ScreenshotPictures {
     /// The Settings window with `section` open, `size` points of it, or only the top `visibleHeight` points when that is
     /// given. The offscreen renderer draws the selected sidebar row as a black rectangle, so that row is painted over
     /// with the row as it looks unselected, under a tint of the accent color.
-    private static func settings(
+    static func settings(
         _ section: SettingsSection, size: CGSize, visibleHeight: CGFloat? = nil, controller: ListeningController,
-        seed: String?
+        store: ProStore, seed: String?
     ) async throws -> ScreenshotPicture {
         let scale: CGFloat = 3
         // Nothing here reads the real Keychain, and no secret is shown as saved.
@@ -195,6 +211,7 @@ enum ScreenshotPictures {
                 .environment(controller)
                 .environment(secrets)
                 .environment(WindowRouter())
+                .environment(store)
                 .environment(\.matchTesterSeed, seed ?? "")
                 .environment(\.controlActiveState, .key)
                 .background(Color(nsColor: .windowBackgroundColor))
@@ -229,7 +246,7 @@ enum ScreenshotPictures {
         let model = OnboardingModel(configuration: fresh, step: .name)
         model.name = "Bala"
         model.variants = ["Balakumar", "Bala Kumar"]
-        let controller = DemoFixtures.controller(.off, configuration: fresh)
+        let controller = DemoFixtures.controller(.off, configuration: fresh, proAccess: .free)
         let view = OnboardingView(presetModel: model)
             .environment(controller)
             .environment(WindowRouter())
@@ -713,16 +730,19 @@ struct AppStoreScreenshotLogicTests {
         context.fillPath()
     }
 
-    @Test("The five screenshots have the file names and headlines of the store listing")
+    @Test("The six screenshots have the file names and headlines of the store listing")
     func specs() {
-        #expect(ScreenshotSpec.all.map(\.name) == ["01-menu-bar", "02-rules", "03-alerts", "04-onboarding", "05-live"])
+        #expect(ScreenshotSpec.all.map(\.name) == [
+            "01-menu-bar", "02-rules", "03-alerts", "04-onboarding", "05-live", "06-pro",
+        ])
         #expect(
             ScreenshotSpec.all.map(\.headline) == [
                 "Know the moment someone says your name",
                 "Choose what to listen for and how to be alerted",
-                "Sound, notification, alarm, push, call or webhook",
+                "Sound, notification, alarm or screen flash",
                 "Set up in a minute",
                 "Your audio never leaves your Mac",
+                "Pro: unlimited rules and alerts to your phone",
             ])
     }
 

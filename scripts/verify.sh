@@ -20,7 +20,7 @@
 #   release      An unsigned universal (arm64 + x86_64) Release build of the app, and `lipo -archs` on every Mach-O in
 #                it, the app and whisper.framework included.
 #   dmg          scripts/build_dmg.sh --no-notarize --unsigned, then hdiutil verify on the disk image.
-#   screenshots  The Screenshots scheme: every render test, and the five App Store screenshots, which are written to
+#   screenshots  The Screenshots scheme: every render test, and the six App Store screenshots, which are written to
 #                build/verify/ and checked there (2880 x 1800, no alpha), so appstore/screenshots/ is not touched.
 #   warnings     Last, once every build of the run is done: no warnings in NameAlert/ or Packages/ in the build logs
 #                of this run (the same check as ci.yml, which looks at the Release build log).
@@ -94,7 +94,7 @@ step_about() {
         release) echo "unsigned arm64 + x86_64 Release build, lipo -archs on every Mach-O in the app" ;;
         warnings) echo "no warnings in NameAlert/ or Packages/ in this run's build logs" ;;
         dmg) echo "scripts/build_dmg.sh --no-notarize --unsigned, then hdiutil verify" ;;
-        screenshots) echo "the Screenshots scheme, and the five App Store screenshots checked in a scratch folder" ;;
+        screenshots) echo "the Screenshots scheme, and the six App Store screenshots checked in a scratch folder" ;;
     esac
 }
 
@@ -526,7 +526,7 @@ step_screenshots() {
         return
     fi
 
-    # The five App Store screenshots are written only when asked for. Asking here, with the output in a scratch folder
+    # The six App Store screenshots are written only when asked for. Asking here, with the output in a scratch folder
     # of this run, runs the whole pipeline without replacing the screenshots in appstore/screenshots/.
     local out="$PWD/$LOG_DIR/store-screenshots" log="$LOG_DIR/screenshots.log"
     rm -rf "$out"
@@ -580,12 +580,12 @@ step_screenshots() {
             bad=$((bad + 1))
         fi
     done
-    if [[ $files -ne 5 ]]; then
-        fail "$files App Store screenshots were written, not 5"
+    if [[ $files -ne 6 ]]; then
+        fail "$files App Store screenshots were written, not 6"
     elif [[ $bad -gt 0 ]]; then
-        fail "$bad of the 5 App Store screenshots are not 2880x1800 without alpha"
+        fail "$bad of the 6 App Store screenshots are not 2880x1800 without alpha"
     else
-        pass "$T_TESTS tests passed in $T_RUNS test runs; the 5 App Store screenshots render at 2880x1800 without alpha"
+        pass "$T_TESTS tests passed in $T_RUNS test runs; the 6 App Store screenshots render at 2880x1800 without alpha"
     fi
 }
 
