@@ -153,6 +153,13 @@ schemes:
         NameAlert: all
     run:
       config: Debug
+      # Local StoreKit testing: the Run action serves Pro from Pro.storekit. XcodeGen writes this into the Run action
+      # only; `xcodebuild test` gets no StoreKit configuration, so the Screenshots tests make their own SKTestSession.
+      # The file sits outside every target's sources, so it never ships in an app.
+      storeKitConfiguration: Pro.storekit
+      # Tick this in Edit Scheme > Run > Arguments to sell Pro in a Debug run, as the App Store build does.
+      commandLineArguments:
+        "-EnforcePro YES": false
     test:
       config: Debug
     archive:
