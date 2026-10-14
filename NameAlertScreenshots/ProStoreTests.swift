@@ -89,6 +89,20 @@ private final class StoreHarness {
     }
 }
 
+/// Reads the purchases again until `condition` holds, every 50 ms for at most `timeout`. Returns whether it held.
+@MainActor
+private func refreshUntil(
+    _ store: ProStore, timeout: Duration = .seconds(10), _ condition: @MainActor () -> Bool
+) async -> Bool {
+    let deadline = ContinuousClock.now + timeout
+    while !condition() {
+        if ContinuousClock.now >= deadline { return false }
+        await store.refresh()
+        try? await Task.sleep(for: .milliseconds(50))
+    }
+    return true
+}
+
 @Suite("Pro purchases", .serialized, .timeLimit(.minutes(2)))
 @MainActor
 struct ProStoreTests {
@@ -268,6 +282,30 @@ struct ProStoreTests {
         #expect(ProStore.merge([7: bought], [7: refunded]) == [7: refunded], "a refund handed over")
         #expect(ProStore.merge([7: refunded], [7: bought]) == [7: refunded], "a read that has not caught up with a refund")
         #expect(ProStore.merge([7: refunded], [8: bought]) == [7: refunded, 8: bought], "bought again")
+    }
+
+    @Test("Once a read has a purchase, the reads decide: an Apple Account that owns nothing is Free")
+    func readsDecideOnceTheyHaveThePurchase() async throws {
+        let h = try await StoreHarness()
+        defer { h.finish() }
+        #expect(await h.startAndWait())
+        await h.buy()
+        #expect(h.store.access == .pro)
+        #expect(await refreshUntil(h.store) { h.store.handedOver.isEmpty }, "a read has the purchase now")
+        // Another Apple Account signs in to the App Store, one that owns nothing.
+        h.session.clearTransactions()
+        #expect(await refreshUntil(h.store) { h.store.access == .free })
+        #expect(h.cached?.access == .free)
+    }
+
+    @Test("A handed-over purchase is dropped once a read has it; a refund stays")
+    func handedOverPurchasesAreDroppedOnceRead() {
+        let bought = ProTransaction(productID: ProProduct.id, isRevoked: false)
+        let refunded = ProTransaction(productID: ProProduct.id, isRevoked: true)
+        #expect(ProStore.stillHandedOver([7: bought], after: [:]) == [7: bought], "the read has not caught up")
+        #expect(ProStore.stillHandedOver([7: bought], after: [7: bought]).isEmpty, "from now on the reads decide")
+        #expect(ProStore.stillHandedOver([7: refunded], after: [7: bought]) == [7: refunded], "a refund stays")
+        #expect(ProStore.stillHandedOver([7: bought, 8: refunded], after: [7: bought]) == [8: refunded])
     }
 
     @Test("A closed App Store sheet is not a failure")

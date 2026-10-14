@@ -54,8 +54,10 @@ final class ProStore {
     @ObservationIgnored private var updates: Task<Void, Never>?
     @ObservationIgnored private var refreshOrder = RefreshOrder()
     /// The verified transactions of Pro StoreKit handed over in this launch (a purchase, an Ask to Buy approval, a refund),
-    /// by transaction ID. A read of the purchases can lag a moment behind them, so every read is merged with them.
-    @ObservationIgnored private var handedOver: [UInt64: ProTransaction] = [:]
+    /// by transaction ID. A read of the purchases can lag a moment behind them, so every read is merged with them. A
+    /// purchase is dropped once a read has it (`stillHandedOver`): from then on the reads decide, so an App Store sign-in
+    /// to another Apple Account turns Pro off. A refund stays.
+    @ObservationIgnored private(set) var handedOver: [UInt64: ProTransaction] = [:]
     @ObservationIgnored private var onAccessChange: (@MainActor (ProAccess) -> Void)?
     /// Set by `present`: a state shown for a render, with nothing read or bought.
     @ObservationIgnored private var isPresented = false
@@ -119,6 +121,7 @@ final class ProStore {
         let read = await Task.detached { await ProStore.currentProTransactions() }.value
         guard refreshOrder.shouldApply(ticket) else { return }
         apply(ProEntitlement(transactions: Array(Self.merge(read, handedOver).values)))
+        handedOver = Self.stillHandedOver(handedOver, after: read)
     }
 
     /// Loads the product, unless it is loading already. A product that loaded before stays when a later load fails.
@@ -203,6 +206,14 @@ final class ProStore {
         _ first: [UInt64: ProTransaction], _ second: [UInt64: ProTransaction]
     ) -> [UInt64: ProTransaction] {
         first.merging(second) { a, b in ProTransaction(productID: a.productID, isRevoked: a.isRevoked || b.isRevoked) }
+    }
+
+    /// The handed-over transactions to keep after a read that returned `read`: a refund, and a purchase the read does not
+    /// have yet.
+    static func stillHandedOver(
+        _ handedOver: [UInt64: ProTransaction], after read: [UInt64: ProTransaction]
+    ) -> [UInt64: ProTransaction] {
+        handedOver.filter { id, transaction in transaction.isRevoked || read[id] == nil }
     }
 
     /// Whether `error` means the user closed the App Store's sheet: not a failure.
