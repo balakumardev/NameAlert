@@ -326,6 +326,19 @@ struct ProStoreTests {
         try await h.session.setSimulatedError(nil, forAPI: .verification)
     }
 
+    @Test("A pane closed while the price loads does not leave the price failed")
+    func loadOutlivesItsCaller() async throws {
+        let h = try await StoreHarness()
+        defer { h.finish() }
+        let store = h.store
+        // A SwiftUI .task is cancelled when its view goes away.
+        let load = Task { await store.loadProduct() }
+        load.cancel()
+        await load.value
+        #expect(await pollUntil(timeout: .seconds(10)) { store.productState == .loaded })
+        #expect(store.displayPrice == "$4.99")
+    }
+
     @Test("A closed App Store sheet is not a failure")
     func cancellation() {
         #expect(ProStore.isCancellation(StoreKitError.userCancelled))

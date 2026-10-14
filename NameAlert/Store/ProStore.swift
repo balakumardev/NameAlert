@@ -128,11 +128,13 @@ final class ProStore {
     }
 
     /// Loads the product, unless it is loading already. A product that loaded before stays when a later load fails.
+    /// StoreKit is asked in a detached task: it answers a call whose task was cancelled (a pane or sheet that closed
+    /// while the price loaded, cancelling its `.task`) with no products, which would leave the price failed.
     func loadProduct() async {
         guard isEnforced, !isPresented, productState != .loading else { return }
         productState = .loading
         do {
-            let loaded = try await Product.products(for: [ProProduct.id])
+            let loaded = try await Task.detached { try await Product.products(for: [ProProduct.id]) }.value
             if let pro = loaded.first(where: { $0.id == ProProduct.id }) {
                 product = pro
             } else {
