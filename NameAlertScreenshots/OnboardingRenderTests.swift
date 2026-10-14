@@ -109,6 +109,24 @@ struct OnboardingRenderTests {
         try await render(.permissions, name: "onboarding-3-permissions-ready", dark: false, controller: allowed)
     }
 
+    @Test("3 Permissions render with another copy of the app on this Mac", arguments: [false, true])
+    func permissionsOtherCopy(dark: Bool) async throws {
+        let controller = await SettingsFixtures.controller(
+            configuration: freshConfiguration,
+            permissions: PermissionsSnapshot(
+                microphone: .granted, screenRecording: .notDetermined, speechRecognition: .granted,
+                notifications: .granted))
+        let copies = OtherCopies(urls: [URL(fileURLWithPath: "/Users/someone/Downloads/NameAlert.app", isDirectory: true)])
+        let view = SettingsRenderFrame {
+            PermissionsStep(model: model(.permissions), continueAnyway: {}, otherCopies: copies)
+                .environment(controller)
+                .frame(width: OnboardingView.size.width, height: OnboardingView.size.height)
+        }
+        try await RenderHarness.render(
+            view, size: OnboardingView.size, name: "onboarding-3-permissions-other-copy" + suffix(dark),
+            appearance: appearance(dark), afterWaiting: settleTime)
+    }
+
     @Test("4 Your name renders filled in", arguments: [false, true])
     func name(dark: Bool) async throws {
         try await render(
@@ -688,31 +706,38 @@ struct OnboardingLogicTests {
 
     // MARK: Other copies of the app
 
-    @Test("Another registered copy is found by its path, however it is spelled, and the running copy is not")
+    @Test("Another registered copy is found by its path, however it is spelled; the running copy and gone ones are not")
     func otherCopies() throws {
         let running = URL(fileURLWithPath: "/Applications/NameAlert.app", isDirectory: true)
         let other = URL(fileURLWithPath: "/Users/someone/Downloads/NameAlert.app", isDirectory: true)
-        #expect(OtherCopies.others(of: running, among: []) == [])
-        #expect(OtherCopies.others(of: running, among: [running]) == [])
-        #expect(OtherCopies.others(of: running, among: [other, running]) == [other])
+        let there: (URL) -> Bool = { _ in true }
+        #expect(OtherCopies.others(of: running, among: [], exists: there) == [])
+        #expect(OtherCopies.others(of: running, among: [running], exists: there) == [])
+        #expect(OtherCopies.others(of: running, among: [other, running], exists: there) == [other])
         // The running copy spelled another way, and the other copy twice.
         let respelled = URL(fileURLWithPath: "/Applications/Utilities/../NameAlert.app/", isDirectory: true)
-        #expect(OtherCopies.others(of: running, among: [respelled, other, other]) == [other])
+        #expect(OtherCopies.others(of: running, among: [respelled, other, other], exists: there) == [other])
+        // LaunchServices can still list a copy that was deleted, or one on a disk image that was ejected.
+        let ejected = URL(fileURLWithPath: "/Volumes/NameAlert/NameAlert.app", isDirectory: true)
+        #expect(OtherCopies.others(of: running, among: [ejected, other], exists: { $0 != ejected }) == [other])
 
-        // A symbolic link to the running copy is the running copy.
+        // On disk: a symbolic link to the running copy is the running copy, and a copy that is not there is left out.
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("other-copies-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: folder) }
         let app = folder.appendingPathComponent("NameAlert.app", isDirectory: true)
+        let elsewhere = folder.appendingPathComponent("Elsewhere/NameAlert.app", isDirectory: true)
+        let gone = folder.appendingPathComponent("Gone/NameAlert.app", isDirectory: true)
         try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
         let link = folder.appendingPathComponent("Link.app", isDirectory: true)
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: app)
-        #expect(OtherCopies.others(of: app, among: [link, other]) == [other])
+        #expect(OtherCopies.others(of: app, among: [link, gone, elsewhere]) == [elsewhere])
         #expect(OtherCopies.others(of: link, among: [app]) == [])
 
         // A copy Gatekeeper runs from a random folder cannot tell which registered copy it is.
         let translocated = URL(
             fileURLWithPath: "/private/var/folders/ab/xyz/T/AppTranslocation/0A1B/d/NameAlert.app", isDirectory: true)
-        #expect(OtherCopies.others(of: translocated, among: [other]) == [])
+        #expect(OtherCopies.others(of: translocated, among: [other], exists: there) == [])
     }
 
     @Test("The note says where the other copy is and what to do, on the Screen Recording card until it is allowed")

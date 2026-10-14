@@ -30,14 +30,21 @@ final class OtherCopies {
         if found != urls { urls = found }
     }
 
-    /// The copies in `registered` other than `running`, in the same order. Paths are compared standardized and with
-    /// symbolic links resolved. A copy that Gatekeeper runs from a random folder (App Translocation) cannot tell which
-    /// registered copy it is, so it finds none.
-    nonisolated static func others(of running: URL, among registered: [URL]) -> [URL] {
+    /// The copies in `registered` other than `running`, in the same order, without those whose files are gone:
+    /// LaunchServices can still list a copy that was deleted, or one on a disk image that was ejected. Paths are
+    /// compared standardized and with symbolic links resolved. A copy that Gatekeeper runs from a random folder (App
+    /// Translocation) cannot tell which registered copy it is, so it finds none.
+    ///
+    /// Looking a path up is allowed in the sandbox, and inside Downloads too without asking (only reading what is in a
+    /// folder there asks).
+    nonisolated static func others(
+        of running: URL, among registered: [URL],
+        exists: (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path) }
+    ) -> [URL] {
         let own = canonicalPath(running)
         guard !own.contains("/AppTranslocation/") else { return [] }
         var seen: Set<String> = [own]
-        return registered.filter { seen.insert(canonicalPath($0)).inserted }
+        return registered.filter { seen.insert(canonicalPath($0)).inserted && exists($0) }
     }
 
     nonisolated private static func canonicalPath(_ url: URL) -> String {
