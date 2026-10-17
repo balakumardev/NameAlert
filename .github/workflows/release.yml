@@ -139,7 +139,8 @@ jobs:
 
       - name: Run the package tests
         # Before anything is signed: a release that fails its own tests is not published.
-        run: swift test --package-path Packages/NameAlertKit
+        # One test at a time, as in ci.yml: side by side, the tests with real timers starve behind the CPU-bound ones.
+        run: swift test --package-path Packages/NameAlertKit --no-parallel
 
       - name: Install xcodegen 2.46.0 and jq
         env:

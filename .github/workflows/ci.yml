@@ -125,7 +125,10 @@ jobs:
 
       - name: Run the package tests
         if: steps.xcode.outputs.skip != 'true'
-        run: swift test --package-path Packages/NameAlertKit
+        # One test at a time. A runner has 3 or 4 cores and builds the tests unoptimized. Side by side, the CPU-bound
+        # tests (rule matching on a long transcript) hold the threads that the tests with real timers (debounced
+        # writes, channel time-outs) need, so those wait for a write that comes late or time out a second too late.
+        run: swift test --package-path Packages/NameAlertKit --no-parallel
 
       - name: Cache the whisper models
         if: steps.xcode.outputs.skip != 'true' && matrix.whisper
@@ -142,8 +145,8 @@ jobs:
         env:
           NAMEALERT_INTEGRATION: '1'
         # WhisperEngineTests only. The other opt-in tests need permissions or hardware that a runner does not have,
-        # and the performance test is for scripts/verify.sh.
-        run: swift test --package-path Packages/NameAlertKit --filter WhisperEngineTests
+        # and the performance test is for scripts/verify.sh. One at a time, as in the step above.
+        run: swift test --package-path Packages/NameAlertKit --filter WhisperEngineTests --no-parallel
 
       - name: Install XcodeGen 2.46.0
         if: steps.xcode.outputs.skip != 'true' && matrix.full

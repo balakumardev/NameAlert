@@ -324,7 +324,8 @@ jobs:
 
       - name: Run the package tests
         if: steps.existing.outputs.exists != 'true'
-        run: swift test --package-path Packages/NameAlertKit
+        # One test at a time, as in ci.yml: side by side, the tests with real timers starve behind the CPU-bound ones.
+        run: swift test --package-path Packages/NameAlertKit --no-parallel
 
       - name: Generate the Xcode project
         if: steps.existing.outputs.exists != 'true'
