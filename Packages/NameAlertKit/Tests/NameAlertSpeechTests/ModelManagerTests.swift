@@ -50,7 +50,8 @@ private func sha256Hex(_ data: Data) -> String {
 /// `count` bytes that do not repeat for a while, so a chunk lost or written twice shows in the checksum.
 private func patternedData(count: Int) -> Data {
     var data = Data(count: count)
-    data.withUnsafeMutableBytes { bytes in
+    // The closure's type is spelled out: Xcode 26 cannot choose between `Data`'s two overloads without it.
+    data.withUnsafeMutableBytes { (bytes: UnsafeMutableRawBufferPointer) in
         for index in 0..<count { bytes[index] = UInt8(truncatingIfNeeded: index &* 31 &+ (index >> 8)) }
     }
     return data
