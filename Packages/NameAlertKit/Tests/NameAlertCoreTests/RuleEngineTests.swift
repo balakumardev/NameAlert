@@ -561,6 +561,25 @@ struct RuleEngineTests {
 
     // MARK: Performance
 
+    /// What four times the text may cost, as a multiple of what a quarter of it cost. Linear growth costs four times
+    /// as much; an engine that compared each word with the whole rest of the text, sixteen times. It is a ratio and not
+    /// a number of seconds because the seconds depend on the machine: the longer test below takes 2 s on a fast Mac
+    /// and 12 s on a CI runner.
+    private static let growthLimit = 10
+    /// A quarter that was over faster than this is counted as this long, so that a fast run cannot make the limit tiny.
+    private static let quickestMeasurable: Duration = .milliseconds(100)
+
+    /// Hears `words` in a new engine, as a long update arrives: the text, and the same text backwards as an
+    /// alternative. Returns how long that took and what was heard.
+    private func timedHear(_ rules: [Rule], _ words: [String]) -> (elapsed: Duration, hits: [Hit]) {
+        var engine = RuleEngine(rules: rules)
+        let reversed = words.reversed().joined(separator: " ")
+        let update = segment("s1", words.joined(separator: " "), alternatives: [reversed])
+        var hits: [Hit] = []
+        let elapsed = ContinuousClock().measure { hits = engine.hear(update, at: t0) }
+        return (elapsed, hits)
+    }
+
     /// A long update must cost time in proportion to its length: each word is compared against every term only
     /// with the few words next to it, never with the whole rest of the text.
     @Test func evaluationGrowsLinearlyWithTheTextLength() {
@@ -571,19 +590,23 @@ struct RuleEngineTests {
                 terms: (0..<5).map { "Name\(index)x\($0) Surname\($0)" },
                 sensitivity: Sensitivity.allCases[index % 3])
         }
-        var engine = RuleEngine(rules: rules)
-        var words = (0..<1_800).map { vocabulary[$0 % vocabulary.count] }
-        words[1_500] = "name3x2"
-        words[1_501] = "surname2"
-        let reversed = words.reversed().joined(separator: " ")
-        let update = segment("s1", words.joined(separator: " "), alternatives: [reversed])
-        #expect(update.text.count > 8_000)
+        func words(_ count: Int) -> [String] {
+            var words = (0..<count).map { vocabulary[$0 % vocabulary.count] }
+            words[count * 5 / 6] = "name3x2"
+            words[count * 5 / 6 + 1] = "surname2"
+            return words
+        }
+        #expect(words(1_800).joined(separator: " ").count > 8_000)
 
-        let clock = ContinuousClock()
-        var hits: [Hit] = []
-        let elapsed = clock.measure { hits = engine.hear(update, at: t0) }
-        #expect(hits.contains { $0.ruleName == "Rule 3" })  // the exact rule finds the planted name
-        #expect(elapsed < .seconds(10), "took \(elapsed)")
+        _ = timedHear(rules, words(90))  // the first run pays for the one-time set-up
+        let quarter = timedHear(rules, words(450))
+        let whole = timedHear(rules, words(1_800))
+        for run in [quarter, whole] {
+            #expect(run.hits.contains { $0.ruleName == "Rule 3" })  // the exact rule finds the planted name
+        }
+        #expect(
+            whole.elapsed < max(quarter.elapsed, Self.quickestMeasurable) * Self.growthLimit,
+            "\(whole.elapsed) for 1,800 words, \(quarter.elapsed) for 450")
     }
 
     /// The same, with terms made of letters only. A word with a digit in it is only ever compared for equality, so
@@ -599,21 +622,25 @@ struct RuleEngineTests {
                 terms: (0..<5).map { "\(first(index, $0)) \(second(index, $0))" },
                 sensitivity: Sensitivity.allCases[index % 3])
         }
-        var engine = RuleEngine(rules: rules)
-        var words = (0..<1_200).map { vocabulary[$0 % vocabulary.count] }
-        words[1_000] = first(3, 2)  // rule 3 is Exact: the name as it is
-        words[1_001] = second(3, 2)
-        words[600] = "x" + first(4, 1).dropFirst()  // rule 4 is Balanced: one letter wrong
-        words[601] = second(4, 1)
-        let reversed = words.reversed().joined(separator: " ")
-        let update = segment("s1", words.joined(separator: " "), alternatives: [reversed])
-        #expect(update.text.count > 5_000)
+        func words(_ count: Int) -> [String] {
+            var words = (0..<count).map { vocabulary[$0 % vocabulary.count] }
+            words[count * 5 / 6] = first(3, 2)  // rule 3 is Exact: the name as it is
+            words[count * 5 / 6 + 1] = second(3, 2)
+            words[count / 2] = "x" + first(4, 1).dropFirst()  // rule 4 is Balanced: one letter wrong
+            words[count / 2 + 1] = second(4, 1)
+            return words
+        }
+        #expect(words(1_200).joined(separator: " ").count > 5_000)
 
-        let clock = ContinuousClock()
-        var hits: [Hit] = []
-        let elapsed = clock.measure { hits = engine.hear(update, at: t0) }
-        #expect(hits.contains { $0.ruleName == "Rule 3" })
-        #expect(hits.contains { $0.ruleName == "Rule 4" })
-        #expect(elapsed < .seconds(10), "took \(elapsed)")
+        _ = timedHear(rules, words(60))  // the first run pays for the one-time set-up
+        let quarter = timedHear(rules, words(300))
+        let whole = timedHear(rules, words(1_200))
+        for run in [quarter, whole] {
+            #expect(run.hits.contains { $0.ruleName == "Rule 3" })
+            #expect(run.hits.contains { $0.ruleName == "Rule 4" })
+        }
+        #expect(
+            whole.elapsed < max(quarter.elapsed, Self.quickestMeasurable) * Self.growthLimit,
+            "\(whole.elapsed) for 1,200 words, \(quarter.elapsed) for 300")
     }
 }
