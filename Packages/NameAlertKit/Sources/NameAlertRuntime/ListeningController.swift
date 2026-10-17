@@ -45,6 +45,37 @@ extension ListeningControllerError: LocalizedError {
 /// **Stopping.** Everything an attempt started is stopped before it ends: capture first, then the engine. A capture
 /// source that does not answer `start()` or `stop()` within `captureCallLimit` is left behind (and stopped if its
 /// start ever returns); the next attempt makes a new one.
+/// A snapshot of how the controller has run since it was created. Counts only: nothing that was heard, no names.
+public struct RuntimeStats: Sendable, Equatable {
+    /// Listening sessions started by a command.
+    public var sessionsStarted: Int
+    /// Admitted hits whose delivery was started.
+    public var deliveriesStarted: Int
+    /// Deliveries that are not over yet.
+    public var deliveriesUnderWay: Int
+    /// Attempts that ended in a failure the controller retried.
+    public var transientFailures: Int
+    /// Failures in a row in the attempt loop right now (back to 0 after a minute of healthy listening).
+    public var currentFailureStreak: Int
+    /// Times the local model reported it was falling behind the audio.
+    public var fallingBehindReports: Int
+    /// Hits the global cooldown held back.
+    public var hitsHeldByCooldown: Int
+
+    public init(
+        sessionsStarted: Int = 0, deliveriesStarted: Int = 0, deliveriesUnderWay: Int = 0, transientFailures: Int = 0,
+        currentFailureStreak: Int = 0, fallingBehindReports: Int = 0, hitsHeldByCooldown: Int = 0
+    ) {
+        self.sessionsStarted = sessionsStarted
+        self.deliveriesStarted = deliveriesStarted
+        self.deliveriesUnderWay = deliveriesUnderWay
+        self.transientFailures = transientFailures
+        self.currentFailureStreak = currentFailureStreak
+        self.fallingBehindReports = fallingBehindReports
+        self.hitsHeldByCooldown = hitsHeldByCooldown
+    }
+}
+
 @MainActor
 @Observable
 public final class ListeningController {
@@ -115,6 +146,22 @@ public final class ListeningController {
     /// ends (within the dispatcher's delivery timeout). Nothing cancels them: their hits were heard before any pause.
     @ObservationIgnored private var deliveries: [UInt64: Task<Void, Never>] = [:]
     @ObservationIgnored private var deliveryCount: UInt64 = 0
+
+    // MARK: Counters for `runtimeStats`
+
+    @ObservationIgnored private var transientFailureCount = 0
+    @ObservationIgnored private var failureStreak = 0
+    @ObservationIgnored private var fallingBehindReportCount = 0
+    @ObservationIgnored private var heldByCooldownCount = 0
+
+    /// Counts of what the controller has done so far, for diagnostics. Reading it changes nothing.
+    public var runtimeStats: RuntimeStats {
+        RuntimeStats(
+            sessionsStarted: Int(clamping: sessionCount), deliveriesStarted: Int(clamping: deliveryCount),
+            deliveriesUnderWay: deliveries.count, transientFailures: transientFailureCount,
+            currentFailureStreak: failureStreak, fallingBehindReports: fallingBehindReportCount,
+            hitsHeldByCooldown: heldByCooldownCount)
+    }
 
     /// Clears `.localModelFallingBehind` once the local model has kept up for a while (see
     /// `noteLocalModelFallingBehind`).
@@ -287,6 +334,19 @@ public final class ListeningController {
 
     public func lastDeliveryFailures() async -> [ChannelKind: DeliveryFailure] {
         await dispatcher.lastFailures()
+    }
+
+    /// Counts of what the alert dispatcher has done since the app started, for diagnostics. Counts only.
+    public func dispatchStats() async -> DispatchStats {
+        await dispatcher.stats()
+    }
+
+    /// The short descriptions (error domain and code) of the last failed writes of the settings and the history, or
+    /// `nil` where the last write worked. For diagnostics.
+    public func lastSaveErrors() async -> (config: String?, history: String?) {
+        let config = await dependencies.configStore.lastSaveError
+        let history = await dependencies.historyStore.lastSaveError
+        return (config, history)
     }
 
     /// Reads the permissions again. When listening stopped for a permission that is now granted, it starts again.
@@ -540,6 +600,7 @@ public final class ListeningController {
     /// at 0 again.
     private func keepListening() async -> AttemptEnd {
         var failures = 0
+        defer { failureStreak = 0 }
         while true {
             let attempt = await runAttempt()
             guard !Task.isCancelled else { return .cancelled }
@@ -551,6 +612,8 @@ public final class ListeningController {
             }
             let delay = backoff(afterFailures: failures)
             failures += 1
+            transientFailureCount += 1
+            failureStreak = failures
             logger.error("""
                 Listening failed (\(String(describing: issue), privacy: .public)); \
                 trying again in \(String(describing: delay), privacy: .public)
@@ -1012,7 +1075,10 @@ public final class ListeningController {
     private func send(_ hit: Hit) async {
         // The rule as it alerts: on Free without the channels that leave the Mac.
         guard let rule = alertingRules.first(where: { $0.id == hit.ruleID }) else { return }
-        guard await dispatcher.admit(hit, rule: rule) else { return }  // held back by the global cooldown
+        guard await dispatcher.admit(hit, rule: rule) else {  // held back by the global cooldown
+            heldByCooldownCount += 1
+            return
+        }
         // Admitted: from here on, it is recorded and delivered exactly once, whatever happens meanwhile.
         await record(hit)
         startDeliveries(of: hit, rule: rule)
@@ -1049,6 +1115,7 @@ public final class ListeningController {
     /// The warning lasts until listening starts over with a new pipeline, or until two minutes pass without another
     /// report: each report starts those two minutes again.
     func noteLocalModelFallingBehind() {
+        fallingBehindReportCount += 1
         fallingBehindExpiry?.cancel()
         let sleep = dependencies.sleep
         fallingBehindExpiry = Task {

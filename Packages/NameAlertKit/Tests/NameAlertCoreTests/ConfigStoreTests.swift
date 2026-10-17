@@ -765,4 +765,24 @@ struct ConfigStoreTests {
             #expect(try readConfiguration(at: file) == config)
         }
     }
+
+    @Test func failedSaveIsExposedAndClearedByTheNextGoodOne() async throws {
+        try await inTemporaryDirectory { directory in
+            // The "folder" that should hold the file is a plain file, so the write cannot work.
+            let blocker = directory.appendingPathComponent("blocker")
+            try Data().write(to: blocker)
+            let good = directory.appendingPathComponent("config.json")
+            let store = ConfigStore(fileURL: blocker.appendingPathComponent("config.json"), debounce: .seconds(3600))
+            #expect(await store.lastSaveError == nil)
+            await store.save(makeConfiguration(ruleNamed: "x"))
+            await store.flush()
+            let failure = await store.lastSaveError
+            #expect(failure?.isEmpty == false)
+
+            let working = ConfigStore(fileURL: good, debounce: .seconds(3600))
+            await working.save(makeConfiguration(ruleNamed: "x"))
+            await working.flush()
+            #expect(await working.lastSaveError == nil)
+        }
+    }
 }

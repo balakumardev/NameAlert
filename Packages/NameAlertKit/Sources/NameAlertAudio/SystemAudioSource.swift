@@ -103,7 +103,7 @@ public actor SystemAudioSource: AudioCaptureSource {
             try await current.stream.stopCapture()
         } catch {
             // Expected when ScreenCaptureKit already stopped the stream (it reported an error): nothing to release.
-            Self.log.debug("Stopping system audio capture: \(error.localizedDescription, privacy: .public)")
+            Self.log.info("Stopping system audio capture reported: \(error.localizedDescription, privacy: .private)")
         }
         current.output.finish(reason: reason)
     }

@@ -1,15 +1,18 @@
 import Foundation
+import NameAlertAlerts
 import NameAlertCore
 import NameAlertRuntime
 import NameAlertSpeech
-import OSLog
 
 /// The text "Copy Diagnostics" puts on the pasteboard, for a support request: which version of what is running, on
 /// which Mac, what it is doing, how it is set up, and what it logged during this run.
 ///
 /// It holds no words you listen for, no rule names, no addresses and no secrets, and nothing that was heard: the set-up
-/// is told in counts and yes or no, and the log is only what the app itself wrote at the info level or above
-/// (transcript text is only ever logged as a private debug line, which is neither kept nor read).
+/// and what the app has done are told in counts and yes or no, and the log is only what the app itself wrote at the
+/// info level or above, less the lines `AppLogCollector` leaves out by rule (transcript text is only ever logged as a
+/// debug line, which is neither kept nor read).
+///
+/// The same facts, as a `ProblemReportEnvironment`, head a problem report (`environment(for:)`).
 enum Diagnostics {
     /// The subsystem the app logs under.
     static let subsystem = "dev.balakumar.namealert"
@@ -34,8 +37,29 @@ enum Diagnostics {
         var warnings: [String]
         var installedModels: [String]
         var configuration: AppConfiguration
+        /// What the app has done since it started, in counts.
+        var activity = Activity()
         /// This run's log lines, or the one line that says why they could not be read.
         var log: [String]
+    }
+
+    /// What the app has done since it started: counts, and the short description (error domain and code) of the last
+    /// failed save. Nothing that was heard, no names, no addresses.
+    struct Activity: Equatable {
+        var runtime: RuntimeStats
+        var dispatch: DispatchStats
+        var configSaveError: String?
+        var historySaveError: String?
+
+        init(
+            runtime: RuntimeStats = RuntimeStats(), dispatch: DispatchStats = DispatchStats(),
+            configSaveError: String? = nil, historySaveError: String? = nil
+        ) {
+            self.runtime = runtime
+            self.dispatch = dispatch
+            self.configSaveError = configSaveError
+            self.historySaveError = historySaveError
+        }
     }
 
     // MARK: Gathering
@@ -45,16 +69,49 @@ enum Diagnostics {
     static func report(for controller: ListeningController, now: Date = Date()) async -> String {
         let resolution = await controller.resolvedEngine()
         let log = await logLines()
-        let version = ProcessInfo.processInfo.operatingSystemVersion
         let snapshot = Snapshot(
             appName: AppInfo.displayName, version: AppInfo.version, build: AppInfo.build,
-            macOS: "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)",
-            architecture: architecture, date: now, state: StatusText.title(for: controller.state, now: now),
+            macOS: osVersionText, architecture: architecture, date: now,
+            state: StatusText.title(for: controller.state, now: now),
             engine: engineText(for: resolution), permissions: controller.permissions,
             warnings: controller.warnings.map(warningText).sorted(),
             installedModels: controller.installedModels.map(\.rawValue).sorted(),
-            configuration: controller.configuration, log: log)
+            configuration: controller.configuration, activity: await activity(for: controller), log: log)
         return format(snapshot)
+    }
+
+    /// What the problem report's `environment` says: this install and this Mac, never a word, rule, address or secret.
+    @MainActor
+    static func environment(for controller: ListeningController) async -> ProblemReportEnvironment {
+        let resolution = await controller.resolvedEngine()
+        return ProblemReportEnvironment(
+            appVersion: AppInfo.version, build: AppInfo.build, macOSVersion: osVersionText, macModel: macModel,
+            architecture: architecture, engine: engineText(for: resolution), locale: Locale.current.identifier,
+            listeningSource: controller.configuration.listening.source.rawValue)
+    }
+
+    /// The counts the controller and the dispatcher keep, and the last failed saves.
+    @MainActor
+    static func activity(for controller: ListeningController) async -> Activity {
+        let errors = await controller.lastSaveErrors()
+        return Activity(
+            runtime: controller.runtimeStats, dispatch: await controller.dispatchStats(),
+            configSaveError: errors.config, historySaveError: errors.history)
+    }
+
+    /// "26.0.1".
+    static var osVersionText: String {
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        return "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
+    }
+
+    /// The Mac's model identifier from `hw.model`, for example "Mac15,3"; "unknown" when it cannot be read.
+    static var macModel: String {
+        var size = 0
+        guard sysctlbyname("hw.model", nil, &size, nil, 0) == 0, size > 1 else { return "unknown" }
+        var bytes = [CChar](repeating: 0, count: size)
+        guard sysctlbyname("hw.model", &bytes, &size, nil, 0) == 0 else { return "unknown" }
+        return String(decoding: bytes.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
     }
 
     /// The architecture this copy of the app runs as.
@@ -107,6 +164,9 @@ enum Diagnostics {
         lines.append("Set-up (counts only)")
         lines.append(contentsOf: setUp(snapshot.configuration).map { "  " + $0 })
         lines.append("")
+        lines.append("Since the app started (counts only)")
+        lines.append(contentsOf: activityLines(snapshot.activity).map { "  " + $0 })
+        lines.append("")
         lines.append("Log, this run (\(snapshot.log.count) lines)")
         lines.append(contentsOf: snapshot.log.map { "  " + $0 })
         return lines.joined(separator: "\n")
@@ -148,6 +208,29 @@ enum Diagnostics {
         return lines
     }
 
+    /// What the app has done, in counts. Channels are named by kind (ntfy, Webhook), never by address.
+    static func activityLines(_ activity: Activity) -> [String] {
+        let runtime = activity.runtime
+        let dispatch = activity.dispatch
+        func perChannel(_ counts: [ChannelKind: Int]) -> String {
+            let parts = ChannelKind.allCases.compactMap { kind in
+                counts[kind].map { "\(kind.displayName) \($0)" }
+            }
+            return parts.isEmpty ? "none" : parts.joined(separator: ", ")
+        }
+        return [
+            "Listening sessions started: \(runtime.sessionsStarted)",
+            "Listening attempts that failed and were retried: \(runtime.transientFailures) (in a row now: \(runtime.currentFailureStreak))",
+            "Times the local model fell behind: \(runtime.fallingBehindReports)",
+            "Hits let through: \(dispatch.admitted); held back by the wait between alerts: \(dispatch.heldByCooldown)",
+            "Deliveries started: \(runtime.deliveriesStarted), under way: \(runtime.deliveriesUnderWay), cancelled: \(dispatch.cancelled)",
+            "Delivered: \(perChannel(dispatch.deliveredByChannel))",
+            "Failed: \(perChannel(dispatch.failedByChannel))",
+            "Last failed save of settings: \(activity.configSaveError ?? "none")",
+            "Last failed save of history: \(activity.historySaveError ?? "none")",
+        ]
+    }
+
     private static func yesNo(_ value: Bool) -> String { value ? "yes" : "no" }
 
     private static func permissionName(_ kind: PermissionKind) -> String {
@@ -169,38 +252,12 @@ enum Diagnostics {
 
     // MARK: The log
 
-    /// This run's log lines from `OSLogStore`, oldest first, at most `limit`. When the store cannot be read, the one
-    /// line that says so.
+    /// This run's log lines, oldest first, at most `limit`: what `AppLogCollector` lets through, one line each. When the
+    /// store cannot be read, the one line that says so.
     static func logLines(limit: Int = logLineLimit) async -> [String] {
-        // Reading the store takes a moment: not on the main thread.
-        await Task.detached(priority: .utility) { readLog(limit: limit) }.value
-    }
-
-    private static func readLog(limit: Int) -> [String] {
-        do {
-            let store = try OSLogStore(scope: .currentProcessIdentifier)
-            let predicate = NSPredicate(format: "subsystem == %@", subsystem)
-            let entries = try store.getEntries(at: store.position(timeIntervalSinceLatestBoot: 0), matching: predicate)
-            var lines: [String] = []
-            for case let entry as OSLogEntryLog in entries {
-                guard let tag = levelTag(entry.level) else { continue }
-                lines.append(logLine(date: entry.date, tag: tag, category: entry.category, message: entry.composedMessage))
-            }
-            return Array(lines.suffix(limit))
-        } catch {
-            return ["The log could not be read: \(error.localizedDescription)"]
-        }
-    }
-
-    /// The word for a level, or `nil` for the ones left out: debug lines are the only place heard text may be logged.
-    private static func levelTag(_ level: OSLogEntryLog.Level) -> String? {
-        switch level {
-        case .info: "info"
-        case .notice: "notice"
-        case .error: "error"
-        case .fault: "fault"
-        case .debug, .undefined: nil
-        @unknown default: nil
+        switch await AppLogCollector.lines(limit: limit) {
+        case .success(let lines): AppLogCollector.reportLines(from: lines)
+        case .failure(let failure): ["The log could not be read: \(failure.description)"]
         }
     }
 

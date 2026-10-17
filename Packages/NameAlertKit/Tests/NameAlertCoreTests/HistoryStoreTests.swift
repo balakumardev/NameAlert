@@ -964,4 +964,23 @@ struct HistoryStoreTests {
             #expect(onDisk == all)
         }
     }
+
+    @Test func failedSaveIsExposed() async throws {
+        try await inTemporaryDirectory { directory in
+            let blocker = directory.appendingPathComponent("blocker")
+            try Data().write(to: blocker)
+            let store = HistoryStore(fileURL: blocker.appendingPathComponent("history.json"), debounce: neverByItself)
+            #expect(await store.lastSaveError == nil)
+            await store.append(makeHit(1))
+            await store.flush()
+            let failure = await store.lastSaveError
+            #expect(failure?.isEmpty == false)
+            #expect(failure?.contains("matched") == false)  // never any heard text
+
+            let working = HistoryStore(fileURL: directory.appendingPathComponent("history.json"), debounce: neverByItself)
+            await working.append(makeHit(2))
+            await working.flush()
+            #expect(await working.lastSaveError == nil)
+        }
+    }
 }

@@ -9,7 +9,7 @@ import Observation
 @Observable
 final class WindowRouter {
     enum Destination: Hashable, Sendable {
-        case settings, onboarding, history, live
+        case settings, onboarding, history, live, crashReport, reportProblem
 
         /// The id of the `Window` scene that shows it; `nil` for Settings, which `openSettings` opens.
         var windowID: String? {
@@ -18,6 +18,8 @@ final class WindowRouter {
             case .onboarding: WindowID.onboarding
             case .history: WindowID.history
             case .live: WindowID.live
+            case .crashReport: WindowID.crashReport
+            case .reportProblem: WindowID.reportProblem
             }
         }
     }
@@ -30,6 +32,12 @@ final class WindowRouter {
     /// setup that starts at Welcome, not the one that was left half way.
     private(set) var onboardingRequests = 0
 
+    /// How many times the crash report window and the problem report window were asked for. Like setup, a window keeps
+    /// its views' state when it is closed and opened again, and each of these must start from what is true now (the
+    /// crashes that wait, an empty message): the window's content loads again when the number changes.
+    private(set) var crashReportRequests = 0
+    private(set) var reportProblemRequests = 0
+
     /// The Settings pane asked for with `openSettings(at:)`, until Settings takes it.
     private(set) var requestedSection: SettingsSection?
 
@@ -39,6 +47,8 @@ final class WindowRouter {
     /// that is open (or opens it where it was left) without losing what was typed in it.
     func open(_ destination: Destination, startsOver: Bool = true) {
         if destination == .onboarding, startsOver { onboardingRequests += 1 }
+        if destination == .crashReport { crashReportRequests += 1 }
+        if destination == .reportProblem { reportProblemRequests += 1 }
         pending = destination
     }
 
@@ -66,4 +76,6 @@ enum WindowID {
     static let onboarding = "onboarding"
     static let history = "history"
     static let live = "live"
+    static let crashReport = "crash-report"
+    static let reportProblem = "report-problem"
 }

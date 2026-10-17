@@ -19,11 +19,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard AppEnvironment.isLive else { return }
+        // First of all: MetricKit hands over the last crash a fraction of a second after the app starts.
+        startCrashReporting()
         NotificationActions.register()
         UNUserNotificationCenter.current().delegate = self
         observeSleepAndWake()
         environment.startPurchases()
         environment.launch()
+    }
+
+    /// Subscribes to crash diagnostics, and offers the crash reports that wait, a little after launch. Nothing is sent:
+    /// the offer opens a window where the person chooses what to do with a report.
+    private func startCrashReporting() {
+        let coordinator = CrashReportPromptCoordinator.shared
+        CrashDiagnosticsCollector.shared.onNewReports = { coordinator.reportsArrived() }
+        CrashDiagnosticsCollector.shared.start()
+        #if DEBUG
+        CrashReportDebugHooks.applyLaunchArguments()
+        #endif
+        coordinator.start()
     }
 
     /// Permission problems are not retried on their own; they are checked again whenever the app comes forward, and so

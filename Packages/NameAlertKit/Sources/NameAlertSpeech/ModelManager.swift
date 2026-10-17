@@ -120,8 +120,17 @@ public actor ModelManager: ModelProviding {
         while !FileManager.default.fileExists(atPath: location.path), location.pathComponents.count > 1 {
             location = location.deletingLastPathComponent()
         }
-        let values = try? location.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-        return values?.volumeAvailableCapacityForImportantUsage
+        let capacity: Int64?
+        do {
+            let values = try location.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            capacity = values.volumeAvailableCapacityForImportantUsage
+        } catch {
+            let ns = error as NSError
+            Disk.logFreeSpaceUnknownOnce("\(ns.domain) \(ns.code)")
+            return nil
+        }
+        if capacity == nil { Disk.logFreeSpaceUnknownOnce("no value") }
+        return capacity
     }
 
     public func isInstalled(_ model: WhisperModel) -> Bool {
@@ -381,7 +390,7 @@ private final class PartialFile {
             try handle.truncate(atOffset: UInt64(keptBytes))
             try handle.seek(toOffset: UInt64(keptBytes))
         } catch {
-            try? handle.close()
+            Disk.close(handle, context: "after a failed open")
             throw error
         }
     }
@@ -398,15 +407,47 @@ private final class PartialFile {
 
     /// Closes after a failure or a cancel. What was written stays, as the start of the next try.
     func abandon() {
-        try? handle.close()
+        Disk.close(handle, context: "after a failure or cancel")
     }
 }
 
 private enum Disk {
+    static let logger = Log.logger("models")
+    private static let freeSpaceLogged = OSAllocatedUnfairLock(initialState: false)
+
+    /// Logs once per process that the free space could not be read.
+    static func logFreeSpaceUnknownOnce(_ detail: String) {
+        let first = freeSpaceLogged.withLock { logged -> Bool in
+            defer { logged = true }
+            return !logged
+        }
+        if first { logger.error("Free disk space could not be read (\(detail, privacy: .public))") }
+    }
+
+    /// Closes `handle`; a failure is logged (error domain and code only) instead of dropped.
+    static func close(_ handle: FileHandle, context: String) {
+        do {
+            try handle.close()
+        } catch {
+            let ns = error as NSError
+            logger.error("Could not close a model file \(context, privacy: .public) (\(ns.domain, privacy: .public) \(ns.code, privacy: .public))")
+        }
+    }
+
     /// The size of the file at `url`, or nil when there is nothing there or it is not a plain file.
+    /// A missing file is normal; any other failure to read it is logged.
     static func regularFileSize(at url: URL) -> Int64? {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-            attributes[.type] as? FileAttributeType == .typeRegular,
+        let attributes: [FileAttributeKey: Any]
+        do {
+            attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        } catch {
+            let ns = error as NSError
+            if !(ns.domain == NSCocoaErrorDomain && (ns.code == NSFileNoSuchFileError || ns.code == NSFileReadNoSuchFileError)) {
+                logger.error("Could not read the size of \(url.lastPathComponent, privacy: .public) (\(ns.domain, privacy: .public) \(ns.code, privacy: .public))")
+            }
+            return nil
+        }
+        guard attributes[.type] as? FileAttributeType == .typeRegular,
             let size = attributes[.size] as? NSNumber
         else { return nil }
         return size.int64Value
@@ -569,14 +610,15 @@ private struct DownloadJob: Sendable {
         do {
             try Disk.removeIfPresent(partialURL)
         } catch {
-            logger.error("Could not delete it: \(error.localizedDescription, privacy: .public)")
+            let ns = error as NSError
+            logger.error("Could not delete it (\(ns.domain, privacy: .public) \(ns.code, privacy: .public)): \(error.localizedDescription, privacy: .private)")
         }
     }
 
     /// The SHA-256 of a file as lowercase hex, read in 1 MB blocks. Stops early when the task is cancelled.
     private func sha256Hex(ofFileAt url: URL) throws -> String {
         let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
+        defer { Disk.close(handle, context: "after hashing") }
         var hasher = SHA256()
         while true {
             try Task.checkCancellation()

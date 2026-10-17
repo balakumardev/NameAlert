@@ -36,6 +36,10 @@ public actor ConfigStore {
     /// this store lives, so that file is never replaced. The values from `save` are kept in memory.
     private(set) var writesAreSuspended = false
 
+    /// A short, non-sensitive description (error domain and code) of the last failed write of `config.json`, or `nil`
+    /// when the last write succeeded or none has been tried. For the UI to show later.
+    public private(set) var lastSaveError: String?
+
     public init(fileURL: URL = AppPaths.configFile, debounce: Duration = .milliseconds(300)) {
         self.fileURL = fileURL
         self.debounce = debounce
@@ -142,7 +146,14 @@ public actor ConfigStore {
         } catch {
             copyFailure = error
             // A copy that stopped halfway is not a backup: take it away so that it is not mistaken for one.
-            if files.fileExists(atPath: copy.path) { try? files.removeItem(at: copy) }
+            if files.fileExists(atPath: copy.path) {
+                do {
+                    try files.removeItem(at: copy)
+                } catch {
+                    let ns = error as NSError
+                    logger.error("Could not remove the incomplete backup \(copy.lastPathComponent, privacy: .public) (\(ns.domain, privacy: .public) \(ns.code, privacy: .public))")
+                }
+            }
         }
 
         let move = Self.backupURL(in: directory, date: Date())
@@ -229,8 +240,11 @@ public actor ConfigStore {
             )
             try data.write(to: fileURL, options: .atomic)
             pending = nil
+            lastSaveError = nil
         } catch {
-            logger.error("Could not save config.json: \(error.localizedDescription, privacy: .public)")
+            let ns = error as NSError
+            lastSaveError = "\(ns.domain) \(ns.code)"
+            logger.error("Could not save config.json (\(ns.domain, privacy: .public) \(ns.code, privacy: .public)): \(error.localizedDescription, privacy: .private)")
         }
     }
 }
@@ -254,10 +268,12 @@ private struct RulesProbe: Decodable {
             shape = .absent
             return
         }
-        if let entries = try? container.decode([AnyEntry].self, forKey: .rules) {
-            shape = .list(count: entries.count)
-        } else {
-            shape = .notAList  // includes `null`: there is nothing to read from it
+        do {
+            shape = .list(count: try container.decode([AnyEntry].self, forKey: .rules).count)
+        } catch {
+            // includes `null`: there is nothing to read from it
+            Log.logger("config").info("config.json: `rules` is not a list")
+            shape = .notAList
         }
     }
 }
@@ -278,6 +294,11 @@ private struct SchemaProbe: Decodable {
 
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        schemaVersion = try? container.decodeIfPresent(Int.self, forKey: .schemaVersion)
+        do {
+            schemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion)
+        } catch {
+            Log.logger("config").info("config.json: `schemaVersion` is malformed and was ignored")
+            schemaVersion = nil
+        }
     }
 }

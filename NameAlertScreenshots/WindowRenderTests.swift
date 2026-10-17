@@ -683,12 +683,9 @@ struct HistoryApiAboutLogicTests {
         #expect(lines.contains { $0.contains(" error [diagnostics-test] Diagnostics test failure \(marker)") })
         // Debug lines, the only place heard text is logged, are not in the report at all.
         #expect(!lines.contains { $0.contains("debug") })
-        // A private value reads as "<private>" in the log store, as it does for the app on any Mac that is not being
-        // debugged. A test run launched by Xcode shows private values (OS_ACTIVITY_DT_MODE), so say nothing there.
-        if ProcessInfo.processInfo.environment["OS_ACTIVITY_DT_MODE"] == nil {
-            #expect(lines.contains { $0.hasSuffix("Diagnostics test failure \(marker): <private>") })
-            #expect(!lines.joined().contains("TRANSCRIPT-WORDS"))
-        }
+        // A process's own `privacy: .private` values are returned UNREDACTED by OSLogStore (measured), so nothing about
+        // privacy is asserted from the log store here: lines that carry private values are kept out by rule
+        // (`AppLogCollector.excludedMessagePrefixes`, see CrashReportingTests).
 
         let line = Diagnostics.logLine(
             date: Date(timeIntervalSince1970: 1_760_175_000), tag: "info", category: "x",

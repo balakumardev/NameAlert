@@ -1,6 +1,23 @@
 import Foundation
 import NameAlertCore
 
+/// Counts of what the dispatcher has done since it was created. Counts only: no hit text, address or secret. In
+/// memory, never saved.
+public struct DispatchStats: Sendable, Equatable {
+    /// Hits `admit` let through.
+    public var admitted = 0
+    /// Deliveries that worked, per channel.
+    public var deliveredByChannel: [ChannelKind: Int] = [:]
+    /// Deliveries that threw or timed out, per channel.
+    public var failedByChannel: [ChannelKind: Int] = [:]
+    /// Hits the global cooldown held back.
+    public var heldByCooldown = 0
+    /// Deliveries that were cancelled (not a failure of their channel).
+    public var cancelled = 0
+
+    public init() {}
+}
+
 /// Sends a hit to the alert channels of the rule that fired, and keeps track of which channels are failing.
 ///
 /// Sending a hit takes two steps. `admit` decides whether it goes out at all: a hit that comes within
@@ -32,6 +49,7 @@ public actor AlertDispatcher {
     private var globalCooldownSeconds = AlertDispatcher.defaultGlobalCooldown
     private var lastAdmission: Date?
     private var failures: [ChannelKind: DeliveryFailure] = [:]
+    private var counters = DispatchStats()
 
     /// - Parameters:
     ///   - channels: The channels that can be delivered to, one for each kind. If two have the same kind, the first is
@@ -66,10 +84,12 @@ public actor AlertDispatcher {
     public func admit(_ hit: Hit, rule: Rule) -> Bool {
         let moment = now()
         if let last = lastAdmission, moment >= last, moment.timeIntervalSince(last) < globalCooldownSeconds {
+            counters.heldByCooldown += 1
             logger.info("A hit was held back by the global cooldown")
             return false
         }
         lastAdmission = moment
+        counters.admitted += 1
         return true
     }
 
@@ -124,6 +144,11 @@ public actor AlertDispatcher {
         }
     }
 
+    /// The counts since this dispatcher was created.
+    public func stats() -> DispatchStats {
+        counters
+    }
+
     /// The latest failure of each channel whose last delivery did not work.
     public func lastFailures() -> [ChannelKind: DeliveryFailure] {
         failures
@@ -135,19 +160,25 @@ public actor AlertDispatcher {
         switch outcome {
         case .delivered:
             failures[kind] = nil
+            counters.deliveredByChannel[kind, default: 0] += 1
         case .failed(let error):
+            counters.failedByChannel[kind, default: 0] += 1
             recordFailure(kind, reason: DeliveryFailure.reason(for: error))
         case .timedOut:
+            counters.failedByChannel[kind, default: 0] += 1
             recordFailure(kind, reason: DeliveryFailure.reason(for: AlertDeliveryError.timedOut))
-        case .declined, .cancelled:
-            break
+        case .declined:
+            logger.info("A \(kind.rawValue, privacy: .public) alert was declined (rate limited)")
+        case .cancelled:
+            counters.cancelled += 1
+            logger.info("A \(kind.rawValue, privacy: .public) alert delivery was cancelled")
         }
     }
 
     private func recordFailure(_ kind: ChannelKind, reason: String) {
         failures[kind] = DeliveryFailure(kind: kind, reason: reason, date: now())
         // The reason can name an address or an account, so it stays private; which channel failed does not.
-        logger.error("A \(kind.rawValue, privacy: .public) alert failed: \(reason, privacy: .private)")
+        logger.error("Alert delivery failed (\(kind.rawValue, privacy: .public)): \(reason, privacy: .private)")
     }
 
     // MARK: One delivery against the clock

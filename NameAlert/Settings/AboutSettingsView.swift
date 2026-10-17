@@ -1,4 +1,5 @@
 import AppKit
+import NameAlertCore
 import NameAlertRuntime
 import SwiftUI
 
@@ -9,6 +10,7 @@ struct AboutSettingsView: View {
     @Environment(WindowRouter.self) private var router
 
     @State private var copy: CopyState = .idle
+    @State private var offersCrashReports = CrashReportPreferences.standard.offerToSend
     @State private var isShowingAcknowledgements: Bool
     @State private var acknowledgements: String?
 
@@ -38,6 +40,8 @@ struct AboutSettingsView: View {
 
             Section {
                 copyDiagnostics
+                reportProblem
+                crashReports
                 setupAgain
             } header: {
                 SettingsSectionTitle("Troubleshooting")
@@ -109,6 +113,26 @@ struct AboutSettingsView: View {
         }
     }
 
+    private var reportProblem: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button("Report a Problem…") { router.open(.reportProblem) }
+                .accessibilityLabel("Report a problem")
+            SettingsCaption(
+                "Write what went wrong, see exactly what the report holds, then copy it and email it. Nothing is sent from the app.")
+        }
+    }
+
+    private var crashReports: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(
+                CrashReportCopy.settingTitle,
+                isOn: Binding(get: { offersCrashReports }, set: setOffersCrashReports)
+            )
+            .accessibilityLabel("Offer crash reports")
+            SettingsCaption(CrashReportCopy.settingDetail)
+        }
+    }
+
     private var setupAgain: some View {
         VStack(alignment: .leading, spacing: 4) {
             Button("Run Setup Again", action: runSetupAgain)
@@ -129,6 +153,13 @@ struct AboutSettingsView: View {
             try? await Task.sleep(for: .seconds(3))
             copy = .idle
         }
+    }
+
+    /// Turning the offer off also deletes the crash reports kept so far: nobody is going to be asked about them.
+    private func setOffersCrashReports(_ isOn: Bool) {
+        offersCrashReports = isOn
+        CrashReportPreferences.standard.offerToSend = isOn
+        if !isOn { PendingCrashReportStore.standard.removeAll() }
     }
 
     private func runSetupAgain() {

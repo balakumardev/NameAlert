@@ -35,6 +35,10 @@ public actor HistoryStore {
     private var isLoaded = false
     /// True while `hits` holds a change that is not in the file: not written yet, or its write failed.
     private var hasUnwrittenChanges = false
+
+    /// A short, non-sensitive description (error domain and code) of the last failed write of `history.json`, or
+    /// `nil` when the last write succeeded or none has been tried. For the UI to show later.
+    public private(set) var lastSaveError: String?
     /// Waits out the debounce, then writes. At most one exists: the first change of a burst starts it, and later
     /// changes only update `hits`.
     private var writeTimer: Task<Void, Never>?
@@ -191,8 +195,11 @@ public actor HistoryStore {
             )
             try data.write(to: fileURL, options: .atomic)
             hasUnwrittenChanges = false
+            lastSaveError = nil
         } catch {
-            logger.error("Could not save history.json: \(error.localizedDescription, privacy: .public)")
+            let ns = error as NSError
+            lastSaveError = "\(ns.domain) \(ns.code)"
+            logger.error("Could not save history.json (\(ns.domain, privacy: .public) \(ns.code, privacy: .public)): \(error.localizedDescription, privacy: .private)")
         }
     }
 

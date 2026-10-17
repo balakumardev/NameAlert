@@ -27,4 +27,9 @@ public enum AppPaths {
     public static var modelsDirectory: URL {
         applicationSupport.appendingPathComponent("Models", isDirectory: true)
     }
+
+    /// `<Application Support>/NameAlert/PendingCrashReports`
+    public static var pendingCrashReportsDirectory: URL {
+        applicationSupport.appendingPathComponent("PendingCrashReports", isDirectory: true)
+    }
 }

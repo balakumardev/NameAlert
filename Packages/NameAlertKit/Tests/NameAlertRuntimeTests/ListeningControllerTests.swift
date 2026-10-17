@@ -831,6 +831,20 @@ struct ListeningControllerTests {
         await h.finish()
     }
 
+    @Test func runtimeStatsCountSessionsAndDeliveries() async throws {
+        let h = try Harness(speech: heyBala(), channel: FakeChannel(.sound))
+        #expect(h.controller.runtimeStats == RuntimeStats())
+        #expect(await h.startListening())
+        #expect(await eventually { h.controller.runtimeStats.deliveriesStarted == 1 })
+        h.controller.noteLocalModelFallingBehind()
+        let stats = h.controller.runtimeStats
+        #expect(stats.sessionsStarted == 1)
+        #expect(stats.fallingBehindReports == 1)
+        #expect(stats.hitsHeldByCooldown == 0)
+        #expect(stats.currentFailureStreak == 0)
+        await h.finish()
+    }
+
     @Test func hitIsRecordedBeforeSlowChannelsFinish() async throws {
         let channel = FakeChannel(.sound, holdsDeliveries: true)  // as slow as the test wants
         let h = try Harness(speech: heyBala(), channel: channel)

@@ -612,4 +612,40 @@ struct AlertDispatcherTests {
                 == "Telegram calls are limited to one a minute — try again shortly.")
         #expect(AlertDeliveryError.rateLimited(.ntfy).localizedDescription.isEmpty == false)
     }
+
+    // MARK: Stats
+
+    @Test func statsCountAdmissionsDeliveriesFailuresAndHeldBackHits() async {
+        let sound = FakeChannel(.sound)
+        let flash = FakeChannel(.screenFlash, .fail(Boom()))
+        let clock = TestClock()
+        let dispatcher = await makeDispatcher([sound, flash], clock: clock, globalCooldown: 3)
+        let rule = rule([.sound, .screenFlash])
+
+        #expect(await dispatcher.stats() == DispatchStats())
+
+        clock.set(to: 0)
+        await dispatcher.dispatch(hit(), rule: rule)
+        clock.set(to: 1)
+        await dispatcher.dispatch(hit(), rule: rule)  // held back
+        clock.set(to: 4)
+        await dispatcher.dispatch(hit(), rule: rule)
+
+        let stats = await dispatcher.stats()
+        #expect(stats.admitted == 2)
+        #expect(stats.heldByCooldown == 1)
+        #expect(stats.deliveredByChannel == [.sound: 2])
+        #expect(stats.failedByChannel == [.screenFlash: 2])
+        #expect(stats.cancelled == 0)
+    }
+
+    @Test func statsCountATimeoutAsAFailure() async {
+        let dispatcher = await makeDispatcher(
+            [FakeChannel(.sound, .hang)], clock: TestClock(), globalCooldown: 0, timeout: .milliseconds(50))
+        await dispatcher.dispatch(hit(), rule: rule([.sound]))
+        let stats = await dispatcher.stats()
+        #expect(stats.admitted == 1)
+        #expect(stats.failedByChannel == [.sound: 1])
+        #expect(stats.deliveredByChannel.isEmpty)
+    }
 }

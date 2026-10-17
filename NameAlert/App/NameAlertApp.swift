@@ -39,5 +39,17 @@ struct NameAlertApp: App {
                 .appEnvironment(environment)
         }
         .defaultSize(width: 620, height: 460)
+
+        Window(CrashReportCopy.windowTitle, id: WindowID.crashReport) {
+            CrashReportWindowContent()
+                .appEnvironment(environment)
+        }
+        .windowResizability(.contentSize)
+
+        Window(ReportProblemCopy.windowTitle, id: WindowID.reportProblem) {
+            ReportProblemWindowContent()
+                .appEnvironment(environment)
+        }
+        .windowResizability(.contentSize)
     }
 }

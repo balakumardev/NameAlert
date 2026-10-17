@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// The last answer StoreKit gave about Pro on this Mac, and when.
 public struct ProAccessRecord: Codable, Sendable, Equatable {
@@ -18,6 +19,7 @@ public struct ProAccessCache {
     public static let key = "pro.lastVerifiedAccess"
 
     private let defaults: UserDefaults
+    private let logger = Log.logger("pro")
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -26,11 +28,22 @@ public struct ProAccessCache {
     /// The saved record; `nil` when there is none or it cannot be read.
     public func load() -> ProAccessRecord? {
         guard let data = defaults.data(forKey: Self.key) else { return nil }
-        return try? JSONDecoder().decode(ProAccessRecord.self, from: data)
+        do {
+            return try JSONDecoder().decode(ProAccessRecord.self, from: data)
+        } catch {
+            let ns = error as NSError
+            logger.error("Could not read the saved Pro answer (\(ns.domain, privacy: .public) \(ns.code, privacy: .public)); treating it as none")
+            return nil
+        }
     }
 
     public func save(_ record: ProAccessRecord) {
-        guard let data = try? JSONEncoder().encode(record) else { return }
-        defaults.set(data, forKey: Self.key)
+        do {
+            let data = try JSONEncoder().encode(record)
+            defaults.set(data, forKey: Self.key)
+        } catch {
+            let ns = error as NSError
+            logger.error("Could not save the Pro answer (\(ns.domain, privacy: .public) \(ns.code, privacy: .public))")
+        }
     }
 }

@@ -182,16 +182,23 @@ struct PopoverFooter: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        HStack(spacing: 4) {
-            Button("Settings…") { open(.settings) }
-                .keyboardShortcut(",", modifiers: .command)
-                .accessibilityLabel("Open Settings")
-            Button("History…") { open(.history) }
-                .accessibilityLabel("Open History")
-            Spacer(minLength: 8)
-            Button("Quit \(AppInfo.displayName)") { NSApp.terminate(nil) }
-                .keyboardShortcut("q", modifiers: .command)
-                .accessibilityLabel("Quit \(AppInfo.displayName)")
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 4) {
+                Button("Settings…") { open(.settings) }
+                    .keyboardShortcut(",", modifiers: .command)
+                    .accessibilityLabel("Open Settings")
+                Button("History…") { open(.history) }
+                    .accessibilityLabel("Open History")
+                Spacer(minLength: 8)
+                Button("Quit \(AppInfo.displayName)") { NSApp.terminate(nil) }
+                    .keyboardShortcut("q", modifiers: .command)
+                    .accessibilityLabel("Quit \(AppInfo.displayName)")
+            }
+            HStack(spacing: 4) {
+                Button("Report a Problem…") { open(.reportProblem) }
+                    .accessibilityLabel("Report a problem")
+                Spacer(minLength: 8)
+            }
         }
         .buttonStyle(RowButtonStyle())
         .padding(8)

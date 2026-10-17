@@ -172,6 +172,8 @@ schemes:
       # Tick this in Edit Scheme > Run > Arguments to sell Pro in a Debug run, as the App Store build does.
       commandLineArguments:
         "-EnforcePro YES": false
+        # Tick this to see the crash report window without crashing: it keeps one made-up crash report (Debug only).
+        "-SimulatePendingCrashReport YES": false
     test:
       config: Debug
     archive:
