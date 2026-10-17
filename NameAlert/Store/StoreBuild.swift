@@ -19,6 +19,16 @@ enum StoreBuild {
         #endif
     }()
 
+    /// Whether this is the Mac App Store build, as compiled (no Debug launch argument changes it). The update check asks
+    /// on this and nothing else: every other build has no store to be updated from.
+    static let isAppStoreBuild: Bool = {
+        #if APP_STORE_BUILD
+        return true
+        #else
+        return false
+        #endif
+    }()
+
     #if APP_STORE_BUILD
     /// Only the App Store build has this text, so `scripts/check_purchase_mode.sh` can tell a build that sells from one
     /// that does not. It is longer than 15 bytes, so the compiler keeps it as a string in the binary, and `ProStore` logs

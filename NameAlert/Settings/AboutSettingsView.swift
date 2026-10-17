@@ -8,9 +8,11 @@ import SwiftUI
 struct AboutSettingsView: View {
     @Environment(ListeningController.self) private var controller
     @Environment(WindowRouter.self) private var router
+    @Environment(UpdateCheckCoordinator.self) private var updates: UpdateCheckCoordinator?
 
     @State private var copy: CopyState = .idle
     @State private var offersCrashReports = CrashReportPreferences.standard.offerToSend
+    @State private var checksForUpdates = UpdateCheckPreferences(defaults: .standard).isEnabled
     @State private var isShowingAcknowledgements: Bool
     @State private var acknowledgements: String?
 
@@ -36,6 +38,14 @@ struct AboutSettingsView: View {
                     .foregroundStyle(.tint)
             } header: {
                 SettingsSectionTitle("Help")
+            }
+
+            if let updates, updates.isAvailable {
+                Section {
+                    updateChecks(updates)
+                } header: {
+                    SettingsSectionTitle("Updates")
+                }
             }
 
             Section {
@@ -133,6 +143,28 @@ struct AboutSettingsView: View {
         }
     }
 
+    /// The switch for the daily App Store check, what that check asks and sends, and a button for checking now. The
+    /// section exists only in the App Store build: no other build checks.
+    private func updateChecks(_ updates: UpdateCheckCoordinator) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(
+                    UpdateCheckCopy.aboutToggleTitle,
+                    isOn: Binding(get: { checksForUpdates }, set: setChecksForUpdates)
+                )
+                .accessibilityLabel("Check for updates automatically")
+                SettingsCaption(UpdateCheckCopy.aboutToggleDetail)
+            }
+            HStack(spacing: 12) {
+                Button(UpdateCheckCopy.aboutCheckButton) { Task { await updates.checkManually() } }
+                    .accessibilityLabel("Check for updates now")
+                Text(verbatim: UpdateCheckCopy.lastChecked(updates.lastCheckDate, now: Date()))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     private var setupAgain: some View {
         VStack(alignment: .leading, spacing: 4) {
             Button("Run Setup Again", action: runSetupAgain)
@@ -160,6 +192,11 @@ struct AboutSettingsView: View {
         offersCrashReports = isOn
         CrashReportPreferences.standard.offerToSend = isOn
         if !isOn { PendingCrashReportStore.standard.removeAll() }
+    }
+
+    private func setChecksForUpdates(_ isOn: Bool) {
+        checksForUpdates = isOn
+        UpdateCheckPreferences(defaults: .standard).isEnabled = isOn
     }
 
     private func runSetupAgain() {

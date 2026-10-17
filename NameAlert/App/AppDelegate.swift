@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         UNUserNotificationCenter.current().delegate = self
         observeSleepAndWake()
         environment.startPurchases()
+        environment.updates.start()
         environment.launch()
     }
 

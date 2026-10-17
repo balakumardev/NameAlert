@@ -46,7 +46,7 @@ Install it from the [Mac App Store](#app-store).
 - The words around a mention leave only if you set up ntfy, a Telegram call (CallMeBot) or a webhook, and only to the service you chose.
 - Transcription uses on-device speech recognition, or a small local model on Macs without it. The model is downloaded once from huggingface.co.
 - No user accounts, no tracking, and no analytics.
-- The network connections are the model download, the alert services you set up, and Apple: the App Store, which tells Takeheed whether you own Pro, and macOS, which downloads Apple's own speech assets when they are needed.
+- The network connections are the model download, the alert services you set up, and Apple: the App Store, which tells Takeheed whether you own Pro, and macOS, which downloads Apple's own speech assets when they are needed. In the App Store build, Takeheed also asks Apple's public App Store lookup once a day whether a newer version is out. That request names only the app and carries nothing about you or your Mac, and you can turn it off in Settings, About. Takeheed never downloads or installs an update itself: Update opens the App Store.
 - Crash reports and problem reports are made on your Mac and stay there. They leave only if you choose to copy one and send it yourself; Takeheed has no server and sends nothing on its own. You can turn crash reports off in Settings, About.
 - Secrets and tokens are saved in the macOS Keychain.
 

@@ -179,6 +179,7 @@ enum SnoozeChoice {
 /// Settings, History and Quit, along the bottom like the end of a menu.
 struct PopoverFooter: View {
     @Environment(WindowRouter.self) private var router
+    @Environment(UpdateCheckCoordinator.self) private var updates: UpdateCheckCoordinator?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -194,10 +195,27 @@ struct PopoverFooter: View {
                     .keyboardShortcut("q", modifiers: .command)
                     .accessibilityLabel("Quit \(AppInfo.displayName)")
             }
+            if let release = updates?.offeredRelease {
+                HStack(spacing: 4) {
+                    Button(UpdateCheckCopy.menuAvailable(version: release.version)) {
+                        updates?.presentOfferedUpdate()
+                        dismiss()
+                    }
+                    .accessibilityLabel("Update available, version \(release.version)")
+                    Spacer(minLength: 8)
+                }
+            }
             HStack(spacing: 4) {
                 Button("Report a Problem…") { open(.reportProblem) }
                     .accessibilityLabel("Report a problem")
                 Spacer(minLength: 8)
+                if let updates, updates.isAvailable {
+                    Button(UpdateCheckCopy.menuCheck) {
+                        Task { await updates.checkManually() }
+                        dismiss()
+                    }
+                    .accessibilityLabel("Check for updates")
+                }
             }
         }
         .buttonStyle(RowButtonStyle())

@@ -16,13 +16,16 @@ final class AppEnvironment {
             dependencies: .live(appVersion: AppInfo.version, build: AppInfo.build), proAccess: store.access)
         // The alarm panel's Snooze button and the local model's falling-behind warning reach the controller here.
         ControllerBox.shared.controller = controller
-        return AppEnvironment(controller: controller, router: WindowRouter(), store: store)
+        let updates = UpdateCheckCoordinator.live(isBusy: { UpdateCheckCoordinator.isBusy(controller.state) })
+        return AppEnvironment(controller: controller, router: WindowRouter(), store: store, updates: updates)
     }()
 
     let controller: ListeningController
     let router: WindowRouter
     /// Sells Pro in the App Store build. In every other build it sells nothing, and everything is on.
     let store: ProStore
+    /// The App Store update check. It checks nothing in a build that is not the Mac App Store build.
+    let updates: UpdateCheckCoordinator
     /// The Keychain secrets the Alerts settings edit. It reads nothing until a pane asks.
     let secrets = SecretsModel()
 
@@ -42,10 +45,14 @@ final class AppEnvironment {
 
     /// The app uses `shared`; tests make their own, on a controller with stand-ins and a store that sells nothing unless
     /// they pass one.
-    init(controller: ListeningController, router: WindowRouter, store: ProStore = ProStore(isEnforced: false, cache: nil)) {
+    init(
+        controller: ListeningController, router: WindowRouter, store: ProStore = ProStore(isEnforced: false, cache: nil),
+        updates: UpdateCheckCoordinator = .unavailable()
+    ) {
         self.controller = controller
         self.router = router
         self.store = store
+        self.updates = updates
     }
 
     /// Starts selling Pro, in the build that does: every change of what this copy may do reaches the controller. The app
@@ -165,5 +172,6 @@ extension View {
             .environment(environment.router)
             .environment(environment.secrets)
             .environment(environment.store)
+            .environment(environment.updates)
     }
 }
