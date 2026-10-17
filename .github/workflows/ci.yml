@@ -192,17 +192,25 @@ jobs:
           # Every render and logic test of the app's views, in the screenshot host (a Debug build of the app's sources
           # without its @main). The views are drawn in offscreen windows, which the runner's login session allows.
           # The renders go to build/renders; the store screenshots are only written by scripts/render_screenshots.sh.
-          # A test that fails is run once more. On a fresh runner the first purchase through StoreKit
-          # (ProStoreTests.buyingUnlocks) does not return until its 2 minute time limit ends it, and the purchases that
-          # follow in the restarted test process finish at once. A test that is really broken fails both times.
-          xcodebuild test \
-            -project NameAlert.xcodeproj \
-            -scheme Screenshots \
-            -destination 'platform=macOS' \
-            -derivedDataPath build/DerivedData-tests \
-            -testLanguage en -testRegion US \
-            -retry-tests-on-failure -test-iterations 2 \
-            2>&1 | tee build/screenshots-tests.log
+          # If the tests fail they run once more. On a fresh runner the first purchase through StoreKit
+          # (ProStoreTests.buyingUnlocks) did not return before its 2 minute time limit ended it, in every run so far,
+          # and the purchases after the restart of the test process finished at once. (xcodebuild's own
+          # -retry-tests-on-failure does not run again a test that a time limit ended.) A test that is really broken
+          # fails both times, and so does the job.
+          : > build/screenshots-tests.log
+          run_screenshot_tests() {
+            xcodebuild test \
+              -project NameAlert.xcodeproj \
+              -scheme Screenshots \
+              -destination 'platform=macOS' \
+              -derivedDataPath build/DerivedData-tests \
+              -testLanguage en -testRegion US \
+              2>&1 | tee -a build/screenshots-tests.log
+          }
+          if ! run_screenshot_tests; then
+            echo "::warning::The Screenshots scheme tests failed. Running them once more."
+            run_screenshot_tests
+          fi
 
       - name: Fail on warnings in NameAlert/ and Packages/
         if: steps.xcode.outputs.skip != 'true' && matrix.full
